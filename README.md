@@ -55,6 +55,7 @@ RunMetrics
 |:--------|:-----|:--------|
 | Model | `Heat2D`, `Heat2DParams` | what is simulated |
 | Boundary | `Neumann`, `Periodic`, `Dirichlet` | how the domain edge behaves |
+| Forcing | `NoSource`, `UniformSource`, `PatternSource`, `TimeSeries` | what drives it from outside |
 | Backend | `CPUBackend`, `KernelBackend`, `CUDADevice`, `MetalDevice`, `ROCmDevice` | where it runs |
 | Runtime | `Simulation`, `Steps`, `UntilTime`, `Converged`, `WallClock`, `AnyOf` | how long it runs |
 | Metrics | `RunMetrics`, `mlups`, `bandwidth_gbs`, `arithmetic_intensity` | what it cost |
@@ -102,6 +103,52 @@ Measured total heat starting from 100.0 (`examples/boundary_conditions.jl`):
 
 "Total heat is conserved" is only a valid check under a conserving boundary
 condition, and only a meaningful one once heat has had time to reach the edge.
+
+### Driving the model from its environment
+
+Without forcing, `Heat2D` is a closed system: it can only redistribute the heat
+it started with. A twin of a real installation needs a **source term** and,
+usually, a boundary that changes over time.
+
+```
+du/dt = alpha * laplacian(u) + q(x, y, t)
+```
+
+| Source | `q` | Use |
+|:-------|:----|:----|
+| `NoSource()` | `0` | closed system (default); compiles away entirely |
+| `UniformSource(rate)` | `rate` everywhere | ambient gain or loss |
+| `PatternSource(pattern, rate)` | `rate * pattern[i,j]` | heaters, pipes, any fixed layout |
+
+Anywhere a value is accepted, a **callable of simulated time** is too:
+
+```julia
+outdoor = TimeSeries(hours, temperatures)          # interpolates sampled data
+demand(t) = max(0.0f0, 0.06f0 * (16 - outdoor(t))) # a weather-compensated control law
+
+model = Heat2D(nx = 96, ny = 96, dt = 0.02f0,
+               boundary = Dirichlet(outdoor),              # the edge follows the weather
+               source = PatternSource(layout, demand))     # the heaters follow the operator
+```
+
+`PatternSource` separates *where* the forcing acts from *how strong it is*: the
+pattern is fixed geometry that stays on the GPU untouched, while the rate is one
+scalar per step that can come from a measurement series. Time-dependent values
+are evaluated once per step on the host, because a GPU kernel cannot call a
+Julia closure and would not want to re-evaluate one scalar in a million threads.
+
+Two consequences worth stating in a report:
+
+- A driven model has **no conservation invariant** — `conserves_state` returns
+  `false` as soon as a source is present, whatever the boundary condition.
+- An additive source does not change the stability limit, so `cfl_number` is
+  unaffected. It can still make the solution grow without bound; that is
+  physics, not instability, and the two should not be confused.
+
+`examples/driven_heat.jl` runs Case A and separates three timescales in one
+table — the daily cycle penetrating a short distance from the edge, the bulk
+trend over thousands of hours, and the compute time that is negligible against
+both.
 
 ### Stability is checked, not discovered
 
@@ -258,6 +305,7 @@ docs/labs/           lab notes
 | `heat2d_gpu.jl` | the same model on whichever GPU is available |
 | `backend_comparison.jl` | the performance table above, plus benchmarking method |
 | `boundary_conditions.jl` | conservation and why the boundary condition decides it |
+| `driven_heat.jl` | a model driven by weather and a control law; timescale separation |
 | `stability_cfl.jl` | what exceeding the CFL limit actually does |
 | `digital_twin.jl` | assimilation, real-time pacing, checkpoint and restart |
 | `random_walk_ensemble.jl` | reproducible parallel Monte Carlo |

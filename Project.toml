@@ -4,6 +4,7 @@ authors = ["Arnis Lektauers <arnis.lektauers@rtu.lv>"]
 version = "0.2.0"
 
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -20,6 +21,7 @@ VisuTwinSimMetalExt = ["Metal"]
 
 [compat]
 AMDGPU = "1"
+Adapt = "4"
 CUDA = "5"
 KernelAbstractions = "0.9, 1"
 Printf = "1"

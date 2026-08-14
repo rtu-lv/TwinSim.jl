@@ -19,6 +19,7 @@ simulation is part of its result rather than an afterthought.
 """
 module VisuTwinSim
 
+using Adapt
 using KernelAbstractions
 using Printf
 using Random
@@ -48,6 +49,13 @@ export
     sum_state,
     center_value,
     conserves_state,
+    # forcing
+    SourceTerm,
+    NoSource,
+    UniformSource,
+    PatternSource,
+    TimeSeries,
+    is_driven,
     # model
     Heat2D,
     Heat2DParams,
@@ -83,6 +91,7 @@ export
 
 include("backends.jl")
 include("boundary.jl")
+include("source.jl")
 include("field.jl")
 include("metrics.jl")
 include("heat2d.jl")

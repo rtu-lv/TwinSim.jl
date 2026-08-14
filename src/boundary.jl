@@ -36,15 +36,48 @@ struct Periodic <: BoundaryCondition end
 """
     Dirichlet(value = 0)
 
-Edge cells are held at `value` for the whole run. Interior heat drains into the
-boundary and disappears, so the total is *not* conserved — run
+Edge cells are held at `value`. Interior heat drains into the boundary and
+disappears, so the total is *not* conserved — run
 `examples/boundary_conditions.jl` to watch it decay.
+
+`value` may also be a **callable of simulated time**, which is how a twin is
+driven by its environment:
+
+```julia
+Dirichlet(t -> 5.0f0 + 10.0f0 * sin(2pi * t / 24))   # a daily cycle
+Dirichlet(TimeSeries(hours, outdoor_temperatures))   # measured or forecast data
+```
+
+The callable is evaluated once per step on the host, and the resulting scalar is
+what the kernel receives. See [`TimeSeries`](@ref).
 """
 struct Dirichlet{T} <: BoundaryCondition
     value::T
 end
 
 Dirichlet() = Dirichlet(0.0f0)
+
+"""
+    is_driven(bc) -> Bool
+
+Whether the boundary value depends on simulated time.
+"""
+# Dispatch on "not a number" rather than "is a Function": a callable struct such
+# as TimeSeries does not subtype Function, and neither do most user-defined
+# callables. A Dirichlet value is either a plain number or something to call.
+is_driven(::BoundaryCondition) = false
+is_driven(::Dirichlet) = true
+is_driven(::Dirichlet{<:Number}) = false
+
+"""
+    resolve(bc, t, ::Type{T}) -> BoundaryCondition
+
+Evaluate any time-dependent boundary value at simulated time `t` and convert to
+the field element type, producing an `isbits` value fit to be a kernel argument.
+"""
+@inline resolve(bc::Union{Neumann,Periodic}, t, ::Type{T}) where {T} = bc
+@inline resolve(bc::Dirichlet{<:Number}, t, ::Type{T}) where {T} = Dirichlet(convert(T, bc.value))
+@inline resolve(bc::Dirichlet, t, ::Type{T}) where {T} = Dirichlet(convert(T, bc.value(t)))
 
 # Neighbour index lookups. `clamp` gives the mirrored ghost cell that makes the
 # flux across the edge zero; `mod1` wraps. Both are branch-light and work
@@ -59,6 +92,13 @@ Dirichlet() = Dirichlet(0.0f0)
 Whether `bc` keeps the sum over the grid constant. Used by the test suite to
 decide which invariant to assert.
 """
+function Base.show(io::IO, bc::Dirichlet)
+    print(io, "Dirichlet(")
+    is_driven(bc) ? print(io, "driven by ", bc.value) : print(io, bc.value)
+    print(io, ")")
+    return nothing
+end
+
 conserves_state(::Neumann) = true
 conserves_state(::Periodic) = true
 conserves_state(::Dirichlet) = false
@@ -70,4 +110,6 @@ Convert any stored value to the field element type so the boundary condition
 stays `isbits` and does not drag a `Float64` into an otherwise `Float32` kernel.
 """
 adapt_boundary(bc::Union{Neumann,Periodic}, ::Type{T}) where {T} = bc
-adapt_boundary(bc::Dirichlet, ::Type{T}) where {T} = Dirichlet(convert(T, bc.value))
+adapt_boundary(bc::Dirichlet{<:Number}, ::Type{T}) where {T} = Dirichlet(convert(T, bc.value))
+# A time-varying value stays callable; it is converted when it is evaluated.
+adapt_boundary(bc::Dirichlet, ::Type{T}) where {T} = bc

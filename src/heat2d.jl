@@ -77,22 +77,26 @@ The parameter element type follows the field element type, so
 `check_stability = false` disables the CFL check, which is how the lab on
 numerical stability produces a deliberately diverging run.
 """
-struct Heat2D{T,F<:Field2D{T},P<:Heat2DParams{T},B<:BoundaryCondition}
+struct Heat2D{T,F<:Field2D{T},P<:Heat2DParams{T},B<:BoundaryCondition,S<:SourceTerm}
     field::F
     params::P
     boundary::B
+    source::S
 
     # Written out rather than relying on the auto-generated constructor: `T` only
     # appears inside the other type parameters, so spelling the inference out
     # keeps the error message readable when a field and its parameters disagree.
     function Heat2D(field::Field2D{T}, params::Heat2DParams{T},
-                    boundary::BoundaryCondition) where {T}
-        return new{T,typeof(field),typeof(params),typeof(boundary)}(field, params, boundary)
+                    boundary::BoundaryCondition,
+                    source::SourceTerm = NoSource()) where {T}
+        return new{T,typeof(field),typeof(params),typeof(boundary),typeof(source)}(
+            field, params, boundary, source)
     end
 end
 
 function Heat2D(field::Field2D{T};
                 boundary::BoundaryCondition = Neumann(),
+                source::SourceTerm = NoSource(),
                 check_stability::Bool = true,
                 kwargs...) where {T}
     params = Heat2DParams{T}(; kwargs...)
@@ -106,7 +110,16 @@ function Heat2D(field::Field2D{T};
             model with `check_stability = false`.
             """))
     end
-    return Heat2D(field, params, adapt_boundary(boundary, T))
+    check_source_shape(source, size(field))
+    return Heat2D(field, params, adapt_boundary(boundary, T), source)
+end
+
+check_source_shape(::SourceTerm, dims) = nothing
+
+function check_source_shape(source::PatternSource, dims)
+    size(source.pattern) == dims || throw(DimensionMismatch(
+        "source pattern is $(size(source.pattern)) but the field is $dims"))
+    return nothing
 end
 
 function Heat2D(; nx::Integer = 128, ny::Integer = nx, initial = 0.0f0, kwargs...)
@@ -120,7 +133,23 @@ Base.eltype(::Heat2D{T}) where {T} = T
 state(model::Heat2D) = state(model.field)
 sum_state(model::Heat2D) = sum_state(model.field)
 center_value(model::Heat2D) = center_value(model.field)
-conserves_state(model::Heat2D) = conserves_state(model.boundary)
+"""
+    conserves_state(model) -> Bool
+
+Whether the total over the grid must stay constant. True only for a conserving
+boundary condition *and* no forcing: a source adds heat the domain did not start
+with, so a driven model has no conservation invariant to test against.
+"""
+conserves_state(model::Heat2D) =
+    conserves_state(model.boundary) && model.source isa NoSource
+
+"""
+    is_driven(model) -> Bool
+
+Whether anything in the model depends on simulated time. A driven model's
+results depend on *when* it was run, not only on how many steps.
+"""
+is_driven(model::Heat2D) = is_driven(model.boundary) || is_driven(model.source)
 
 """
     bytes_per_cell(model) -> Int
@@ -155,7 +184,10 @@ function Base.show(io::IO, ::MIME"text/plain", model::Heat2D)
     println(io, "  alpha = ", model.params.alpha, ", dt = ", model.params.dt,
                 ", dx = ", model.params.dx, ", dy = ", model.params.dy)
     println(io, "  boundary  ", model.boundary,
-                conserves_state(model) ? " (conserving)" : " (not conserving)")
+                conserves_state(model.boundary) ? " (conserving)" : " (not conserving)")
+    model.source isa NoSource ||
+        println(io, "  source    ", model.source, is_driven(model.source) ? " (time-varying)" : "")
+    is_driven(model.boundary) && println(io, "  boundary is time-varying")
     print(io, "  CFL       ", cfl_number(model), is_stable(model) ? " (stable)" : " (UNSTABLE)")
     return nothing
 end

@@ -29,6 +29,7 @@ end
     include("test_field.jl")
     include("test_model.jl")
     include("test_analytical.jl")
+    include("test_source.jl")
     include("test_backends.jl")
     include("test_runtime.jl")
     include("test_twin.jl")

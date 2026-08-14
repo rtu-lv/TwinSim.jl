@@ -50,11 +50,24 @@ function upload(backend::KernelBackend, model::Heat2D{T}) where {T}
     current = KernelAbstractions.allocate(device, T, size(model.field))
     next = KernelAbstractions.allocate(device, T, size(model.field))
     copyto!(current, model.field.current)
+
+    # A PatternSource carries a grid-sized array of its own, which has to travel
+    # with the field or the kernel would be indexing host memory from the device.
+    source = model.source
+    bytes = sizeof(T) * length(model.field)
+    pattern = source_array(source)
+    if pattern !== nothing
+        device_pattern = KernelAbstractions.allocate(device, eltype(pattern), size(pattern))
+        copyto!(device_pattern, pattern)
+        source = with_array(source, device_pattern)
+        bytes += sizeof(eltype(pattern)) * length(pattern)
+    end
+
     KernelAbstractions.synchronize(device)
     elapsed = (time_ns() - start) / 1e9
 
-    device_model = Heat2D(Field2D(current, next), model.params, model.boundary)
-    return (device_model, elapsed, sizeof(T) * length(model.field))
+    device_model = Heat2D(Field2D(current, next), model.params, model.boundary, source)
+    return (device_model, elapsed, bytes)
 end
 
 """
@@ -141,7 +154,10 @@ function run!(sim::Simulation{<:Heat2D};
             break
         end
 
-        step!(backend, model)
+        # The drive is evaluated at the time *entering* the step, so the first
+        # step sees t = 0 and the series is sampled at the same instants the
+        # state is reported at.
+        step!(backend, model, oftype(dt, state.simulated_time))
         state.step += 1
         state.simulated_time += dt
 
