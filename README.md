@@ -1,20 +1,21 @@
 # VisuTwinSim.jl
 
-Julia teaching and research package for VisuTwin simulation concepts, with a CPU reference backend and an optional CUDA.jl backend.
+Julia teaching and research package for VisuTwin simulation concepts, with a CPU
+reference backend and portable GPU backends for CUDA, Metal and ROCm.
 
-This package is intended for the study course **High-Performance Computing in Simulation and Digital Twin Systems** and for examples accompanying CUDA Julia material.
+Built for the study course **High-Performance Computing in Simulation and
+Digital Twin Systems** and for examples accompanying CUDA Julia material.
 
 ## Goals
 
 - Keep the student-facing API high level.
 - Use pure Julia for the reference implementation.
-- Use CUDA.jl for GPU acceleration without making CUDA mandatory.
+- Run on a GPU without making any particular vendor's GPU mandatory.
 - Mirror the concepts of VisuTwin Sim Core: model, backend, runtime, metrics.
-- Provide examples that can grow into lectures, labs, and book chapters.
+- Make performance part of the result rather than an afterthought: every `run!`
+  returns a measurement that can go straight onto a roofline plot.
 
 ## Quick Start
-
-From this directory:
 
 ```julia
 using Pkg
@@ -22,47 +23,209 @@ Pkg.activate(".")
 Pkg.test()
 ```
 
-Run the CPU example:
-
-```bash
-julia --project=. examples/heat2d_cpu.jl
-```
-
-Run the CUDA example after adding CUDA.jl:
-
-```julia
-using Pkg
-Pkg.add("CUDA")
-```
-
-```bash
-julia --project=. examples/heat2d_cuda.jl
-```
-
-## Example
-
 ```julia
 using VisuTwinSim
 
-model = Heat2D(nx = 128, ny = 128)
+model = Heat2D(nx = 512, ny = 512, alpha = 0.15f0, dt = 0.1f0)
 initialize_peak!(model.field, 100.0f0)
 
-metrics = run!(model; backend = CPUBackend(), steps = 250)
-
-println(metrics)
-println(center_value(model))
+metrics = run!(model; backend = CPUBackend(), steps = 500)
 ```
+
+```
+RunMetrics
+  backend            cpu (Float32)
+  grid               262144 cells
+  steps              500  (simulated time 50)
+  stopped by         steps
+  wall time          0.0266 s
+    compute          0.0266 s
+  throughput         4930.8 MLUP/s
+  bandwidth          39.45 GB/s (compulsory traffic)
+  compute rate       49.31 GFLOP/s
+  arith. intensity   1.250 FLOP/byte
+  total state        99.99999237
+```
+
+`available_backends()` lists what the current session can actually use.
+
+## Concepts
+
+| Concept | Type | Purpose |
+|:--------|:-----|:--------|
+| Model | `Heat2D`, `Heat2DParams` | what is simulated |
+| Boundary | `Neumann`, `Periodic`, `Dirichlet` | how the domain edge behaves |
+| Backend | `CPUBackend`, `KernelBackend`, `CUDADevice`, `MetalDevice`, `ROCmDevice` | where it runs |
+| Runtime | `Simulation`, `Steps`, `UntilTime`, `Converged`, `WallClock`, `AnyOf` | how long it runs |
+| Metrics | `RunMetrics`, `mlups`, `bandwidth_gbs`, `arithmetic_intensity` | what it cost |
+| Twin | `Sensor`, `nudge!`, `save_state`, `load_state` | connecting it to a real system |
+
+### Backends
+
+The backends form a progression, and steps 3–5 run **identical kernel source**:
+
+```julia
+CPUBackend()                    # plain Julia loops, one thread
+CPUBackend(threaded = true)     # the same loops across Threads.nthreads()
+KernelBackend()                 # the portable KernelAbstractions kernel, on CPU
+CUDADevice()                    # the same kernel on NVIDIA   (needs `using CUDA`)
+MetalDevice()                   # the same kernel on Apple    (needs `using Metal`)
+ROCmDevice()                    # the same kernel on AMD      (needs `using AMDGPU`)
+```
+
+`KernelBackend()` exists so the GPU code path stays testable on machines without
+a GPU — the same kernel, executed on the CPU.
+
+GPU backends are loaded through package extensions, so CUDA, Metal and AMDGPU
+are all optional and none of them is a hard dependency.
+
+> The GPU helpers are named `CUDADevice` / `MetalDevice` / `ROCmDevice`, not
+> `CUDABackend` / `MetalBackend`. Those names are already exported by CUDA.jl and
+> Metal.jl, so `using VisuTwinSim, CUDA` followed by `CUDABackend()` would be an
+> ambiguity error rather than a working program.
+
+### Boundary conditions decide whether the model conserves anything
+
+```julia
+Heat2D(nx = 128, boundary = Neumann())        # insulated, conserving (default)
+Heat2D(nx = 128, boundary = Periodic())       # wraps around, conserving
+Heat2D(nx = 128, boundary = Dirichlet(0.0f0)) # edge pinned, heat leaves the domain
+```
+
+Measured total heat starting from 100.0 (`examples/boundary_conditions.jl`):
+
+| steps | 0 | 500 | 2 000 | 10 000 | 50 000 |
+|:------|--:|----:|------:|-------:|-------:|
+| Neumann | 100.0000 | 100.0000 | 100.0000 | 100.0002 | 100.0014 |
+| Periodic | 100.0000 | 100.0000 | 100.0000 | 100.0002 | 100.0000 |
+| Dirichlet | 100.0000 | 100.0000 | 99.9767 | 74.2460 | 3.8898 |
+
+"Total heat is conserved" is only a valid check under a conserving boundary
+condition, and only a meaningful one once heat has had time to reach the edge.
+
+### Stability is checked, not discovered
+
+The explicit scheme is stable only for `alpha * dt * (1/dx^2 + 1/dy^2) <= 1/2`.
+`Heat2D` rejects configurations that violate it instead of producing `NaN`
+several thousand steps later:
+
+```julia
+julia> Heat2D(nx = 64, dt = 2.0f0)
+ERROR: ArgumentError: Unstable configuration: CFL number is 0.6, which exceeds the
+explicit-scheme limit of 0.5. The run would diverge to NaN.
+...
+```
+
+Pass `check_stability = false` to explore the instability deliberately; see
+`examples/stability_cfl.jl`.
+
+## Measured performance
+
+Regenerate all of this on your own machine with:
+
+```bash
+julia --project=. -t auto examples/backend_comparison.jl
+```
+
+**Apple M2 Max, 8 Julia threads, Float32, 500 steps, MLUP/s:**
+
+| grid | `cpu` | `cpu x8` | `ka-cpu` | `metal` |
+|:-----|------:|---------:|---------:|--------:|
+| 256² | 4 877 | 1 520 | 560 | 3 529 |
+| 512² | 4 753 | 6 217 | 2 185 | 7 034 |
+| 1024² | 5 097 | 8 309 | 2 953 | 7 534 |
+| 2048² | 4 354 | 15 389 | 3 854 | 7 342 |
+| 4096² | 3 412 | 15 050 | 3 700 | 7 011 |
+
+**NVIDIA RTX 4070 SUPER (48 MB L2, 504 GB/s rated), Float32, 500 steps:**
+
+| grid | MLUP/s | achieved GB/s |
+|:-----|-------:|--------------:|
+| 256² | 17 615 | 140.9 |
+| 512² | 56 236 | 449.9 |
+| 1024² | 87 732 | 701.9 |
+| 2048² | 97 169 | 777.4 |
+| 4096² | 56 362 | 450.9 |
+
+Three things in that table are worth a lecture each:
+
+- **Threading loses on small grids.** At 256² the threaded backend is 3x *slower*
+  than the serial one; synchronisation costs more than the work saved.
+- **The GPU exceeds its own rated bandwidth between 512² and 2048².** It cannot:
+  777 GB/s against a 504 GB/s rating means the two buffers (32 MB at 2048²) fit
+  inside the 48 MB L2 cache and the data never reaches DRAM. At 4096² the
+  buffers total 128 MB, no longer fit, and throughput falls back to 451 GB/s —
+  89% of the DRAM rating, which is about what a well-behaved stencil should get.
+- **Bandwidth is the metric, not GFLOP/s.** This stencil does 1.25 FLOP per byte
+  in Float32, so it is memory bound everywhere. Switching to `Float64` halves
+  the arithmetic intensity and roughly halves the throughput.
+
+Benchmarking notes are in `examples/backend_comparison.jl`: GPUs need a *timed*
+warm-up (a step-count warm-up measures power-state transitions), CPUs need a
+short one (a long one measures thermal throttling), and the script reports the
+best of three runs because interference can only ever make a run slower.
 
 ## Package Structure
 
 ```text
-src/VisuTwinSim.jl          - CPU backend, models, runtime API
-ext/VisuTwinSimCUDAExt.jl   - optional CUDA.jl backend
-examples/                  - runnable course examples
-test/                      - package tests
-docs/labs/                 - lab notes
+src/backends.jl      backend types and device resolution
+src/boundary.jl      Neumann / Periodic / Dirichlet
+src/field.jl         Field2D, double buffering
+src/heat2d.jl        model, parameters, CFL stability
+src/kernels.jl       the shared stencil and the KernelAbstractions kernel
+src/metrics.jl       RunMetrics and derived performance figures
+src/stopping.jl      stop conditions
+src/runtime.jl       Simulation, run!, host/device movement
+src/twin.jl          sensors, assimilation, checkpoints
+src/ensemble.jl      random walk ensemble
+ext/                 CUDA / Metal / AMDGPU device registration
+examples/            runnable course examples
+test/                package tests
+docs/labs/           lab notes
 ```
+
+## Examples
+
+| Script | Shows |
+|:-------|:------|
+| `heat2d_cpu.jl` | the reference run and its metrics |
+| `heat2d_gpu.jl` | the same model on whichever GPU is available |
+| `backend_comparison.jl` | the performance table above, plus benchmarking method |
+| `boundary_conditions.jl` | conservation and why the boundary condition decides it |
+| `stability_cfl.jl` | what exceeding the CFL limit actually does |
+| `digital_twin.jl` | assimilation, real-time pacing, checkpoint and restart |
+| `random_walk_ensemble.jl` | reproducible parallel Monte Carlo |
+
+## Tests
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+The suite validates against the analytical solution rather than against previous
+output. The sharpest of those checks uses the fact that for this stencil the
+second spatial moment grows by *exactly* `2 * alpha * dt` per step, with no
+discretisation error — which pins down `alpha`, `dt`, `dx` and `dy`
+simultaneously, and (with `dx != dy`) catches a swapped axis.
+
+GPU backends are picked up automatically if present. To exercise them, add the
+vendor package to `test/Project.toml`, or run the suite from an environment that
+has it:
+
+```bash
+julia --project=/path/to/env -t 4 test/runtests.jl
+```
+
+Currently verified: 230 tests passing on CPU, on Metal (Apple M2 Max) and on
+CUDA (RTX 4070 SUPER).
 
 ## Relationship to VisuTwin Sim Core
 
-`VisuTwinSim.jl` is the high-level teaching/research interface. The C++23 `visutwin-sim` project can remain the lower-level production/runtime implementation. The two can later be connected through a C ABI, CxxWrap, Arrow/Parquet state exchange, or generated kernels.
+`VisuTwinSim.jl` is the high-level teaching/research interface. The C++23
+`visutwin-sim` project can remain the lower-level production/runtime
+implementation. The two can later be connected through a C ABI, CxxWrap,
+Arrow/Parquet state exchange, or generated kernels.
+
+The checkpoint format in `src/twin.jl` is deliberately a documented 50-byte
+header plus raw column-major data, so it can be read from C++ or Python without
+a Julia dependency — the simplest available bridge between the two projects.

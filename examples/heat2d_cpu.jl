@@ -1,11 +1,20 @@
+# The reference run: one hot cell in a cold insulated plate.
+#
+#   julia --project=. examples/heat2d_cpu.jl
+
 using VisuTwinSim
 
-model = Heat2D(nx = 128, ny = 128, alpha = 0.15f0, dt = 0.1f0)
+model = Heat2D(nx = 512, ny = 512, alpha = 0.15f0, dt = 0.1f0, boundary = Neumann())
 initialize_peak!(model.field, 100.0f0)
 
-metrics = run!(model; backend = CPUBackend(), steps = 250)
+println(sprint(show, MIME"text/plain"(), model), "\n")
 
-println("backend = ", metrics.backend)
-println("steps = ", metrics.steps)
-println("heat_sum = ", metrics.last_reduction)
-println("center = ", center_value(model))
+metrics = run!(model; backend = CPUBackend(), steps = 500)
+
+show(stdout, MIME"text/plain"(), metrics)
+println("\n")
+println("centre value  ", center_value(model))
+println("total heat    ", sum_state(model), "  (started at 100.0)")
+println()
+println("The total is unchanged because Neumann boundaries are insulating.")
+println("Re-run with `boundary = Dirichlet(0.0f0)` and it will decay instead.")

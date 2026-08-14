@@ -1,35 +1,36 @@
 using Test
 using VisuTwinSim
 
-@testset "Field2D" begin
-    field = Field2D(8, 6)
-    @test size(field) == (8, 6)
-    initialize_peak!(field, 42.0f0)
-    @test center_value(field) == 42.0f0
-    @test sum_state(field) == 42.0f0
+# GPU backends are optional. Any vendor package present in the test environment
+# is picked up automatically; everything else is skipped with a note rather than
+# failing, so the same suite runs on a laptop, in CI and on a cluster node.
+const GPU_BACKENDS = Pair{String,Any}[]
+
+for (pkg, helper) in (("CUDA", CUDADevice), ("Metal", MetalDevice), ("AMDGPU", ROCmDevice))
+    Base.identify_package(pkg) === nothing && continue
+    try
+        @eval using $(Symbol(pkg))
+        # invokelatest: the extension's gpu_device method is defined in a newer
+        # world age than this file was lowered in.
+        push!(GPU_BACKENDS, pkg => Base.invokelatest(helper))
+    catch err
+        @info "GPU backend $pkg present but not usable, skipping" exception = err
+    end
 end
 
-@testset "Heat2D CPU" begin
-    model = Heat2D(nx = 32, ny = 32)
-    initialize_peak!(model.field, 100.0f0)
-    metrics = run!(model; backend = CPUBackend(), steps = 25)
-    @test metrics.backend == :cpu
-    @test metrics.steps == 25
-    @test isapprox(metrics.last_reduction, 100.0; atol = 1.0f-3)
-    @test center_value(model) < 100.0f0
+if isempty(GPU_BACKENDS)
+    @info "No GPU backend available; GPU tests will be skipped. " *
+          "Add CUDA, Metal or AMDGPU to test/Project.toml to exercise them."
+else
+    @info "Testing GPU backends: $(join(first.(GPU_BACKENDS), ", "))"
 end
 
-@testset "Simulation wrapper" begin
-    model = Heat2D(nx = 16, ny = 16)
-    initialize_peak!(model.field, 10.0f0)
-    sim = Simulation(model; backend = CPUBackend(), stop = Steps(4))
-    metrics = run!(sim)
-    @test metrics.steps == 4
-    @test isapprox(sum_state(model), 10.0f0; atol = 1.0f-4)
-end
-
-@testset "Random walk ensemble" begin
-    positions = random_walk_ensemble(trajectories = 128, steps = 16, seed = 7)
-    @test length(positions) == 128
-    @test all(isfinite, positions)
+@testset "VisuTwinSim" begin
+    include("test_field.jl")
+    include("test_model.jl")
+    include("test_analytical.jl")
+    include("test_backends.jl")
+    include("test_runtime.jl")
+    include("test_twin.jl")
+    include("test_ensemble.jl")
 end
