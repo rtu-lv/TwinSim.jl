@@ -127,28 +127,63 @@ Regenerate all of this on your own machine with:
 julia --project=. -t auto examples/backend_comparison.jl
 ```
 
-**Apple M2 Max, 8 Julia threads, Float32, 500 steps, MLUP/s:**
+### CPU vs Metal vs CUDA
 
-| grid | `cpu` | `cpu x8` | `ka-cpu` | `metal` |
-|:-----|------:|---------:|---------:|--------:|
-| 256² | 4 877 | 1 520 | 560 | 3 529 |
-| 512² | 4 753 | 6 217 | 2 185 | 7 034 |
-| 1024² | 5 097 | 8 309 | 2 953 | 7 534 |
-| 2048² | 4 354 | 15 389 | 3 854 | 7 342 |
-| 4096² | 3 412 | 15 050 | 3 700 | 7 011 |
+Throughput in **MLUP/s** (million lattice updates per second), Float32, 500 steps,
+best of three runs:
 
-**NVIDIA RTX 4070 SUPER (48 MB L2, 504 GB/s rated), Float32, 500 steps:**
+| grid | CPU | Metal | CUDA |
+|:-----|----:|------:|-----:|
+| 256² | 4 877 | 3 529 | 17 730 |
+| 512² | 6 217 | 7 034 | 57 100 |
+| 1024² | 8 309 | 7 534 | 88 386 |
+| 2048² | 15 389 | 7 342 | 97 019 |
+| 4096² | 15 050 | 7 011 | 56 381 |
 
-| grid | MLUP/s | achieved GB/s |
-|:-----|-------:|--------------:|
-| 256² | 17 615 | 140.9 |
-| 512² | 56 236 | 449.9 |
-| 1024² | 87 732 | 701.9 |
-| 2048² | 97 169 | 777.4 |
-| 4096² | 56 362 | 450.9 |
+The same runs as **achieved memory bandwidth in GB/s**, which is the meaningful
+figure for a memory-bound stencil:
 
-Three things in that table are worth a lecture each:
+| grid | CPU | Metal | CUDA |
+|:-----|----:|------:|-----:|
+| 256² | 39.0 | 28.2 | 141.8 |
+| 512² | 49.7 | 56.3 | 456.8 |
+| 1024² | 66.5 | 60.3 | 707.1 |
+| 2048² | 123.1 | 58.7 | 776.1 |
+| 4096² | 120.4 | 56.1 | 451.0 |
 
+Hardware, and an important caveat about reading across the columns:
+
+| column | device | host |
+|:-------|:-------|:-----|
+| CPU | Apple M2 Max, 8 Julia threads | same machine as Metal |
+| Metal | Apple M2 Max integrated GPU | same machine as CPU |
+| CUDA | NVIDIA RTX 4070 SUPER, 48 MB L2, 504 GB/s rated | Intel i5-13600K, 20 threads |
+
+**CPU and Metal share a machine, CUDA does not.** The CUDA column is therefore
+not a fair comparison against the CPU column — it is a different host. Measured
+against *its own* CPU (i5-13600K, best of serial and 20-thread), the speedups
+are:
+
+| grid | host CPU | CUDA | speedup |
+|:-----|---------:|-----:|--------:|
+| 256² | 1 892 | 17 730 | 9.4x |
+| 512² | 3 939 | 57 100 | 14.5x |
+| 1024² | 5 440 | 88 386 | 16.2x |
+| 2048² | 12 912 | 97 019 | 7.5x |
+| 4096² | 5 422 | 56 381 | 10.4x |
+
+The CPU column above is the better of the serial and threaded backends at each
+size, since which one wins changes with the grid. The full breakdown of all four
+backends per machine is further down.
+
+Four things in these tables are worth a lecture each:
+
+- **The discrete GPU wins by roughly an order of magnitude; the integrated one
+  does not.** Metal never reaches even 1.2x over the M2 Max CPU and falls to
+  0.5x at large grids. Both sit on the same unified memory, so the GPU has no
+  bandwidth advantage to exploit — it has the same memory as its competitor.
+  A discrete card with its own dedicated GDDR6 is a different proposition, and
+  that difference, not the core count, is what the CUDA column is showing.
 - **Threading loses on small grids.** At 256² the threaded backend is 3x *slower*
   than the serial one; synchronisation costs more than the work saved.
 - **The GPU exceeds its own rated bandwidth between 512² and 2048².** It cannot:
@@ -159,6 +194,37 @@ Three things in that table are worth a lecture each:
 - **Bandwidth is the metric, not GFLOP/s.** This stencil does 1.25 FLOP per byte
   in Float32, so it is memory bound everywhere. Switching to `Float64` halves
   the arithmetic intensity and roughly halves the throughput.
+
+### Full breakdown
+
+All four backends, per machine, MLUP/s:
+
+**Apple M2 Max, 8 Julia threads**
+
+| grid | `cpu` | `cpu x8` | `ka-cpu` | `metal` |
+|:-----|------:|---------:|---------:|--------:|
+| 256² | 4 877 | 1 520 | 560 | 3 529 |
+| 512² | 4 753 | 6 217 | 2 185 | 7 034 |
+| 1024² | 5 097 | 8 309 | 2 953 | 7 534 |
+| 2048² | 4 354 | 15 389 | 3 854 | 7 342 |
+| 4096² | 3 412 | 15 050 | 3 700 | 7 011 |
+
+**Intel i5-13600K, 20 Julia threads, RTX 4070 SUPER**
+
+| grid | `cpu` | `cpu x20` | `ka-cpu` | `cuda` |
+|:-----|------:|----------:|---------:|-------:|
+| 256² | 1 892 | 856 | 615 | 17 730 |
+| 512² | 3 939 | 2 250 | 1 345 | 57 100 |
+| 1024² | 5 440 | 5 199 | 2 034 | 88 386 |
+| 2048² | 3 531 | 12 912 | 3 157 | 97 019 |
+| 4096² | 2 823 | 5 422 | 3 057 | 56 381 |
+
+The i5-13600K is a hybrid design (performance and efficiency cores). Julia's
+`@threads` splits the columns statically and evenly, so every step waits for the
+chunk that landed on the slowest core — which is why its threaded backend only
+overtakes the serial one at 2048², and why its numbers are less regular than the
+homogeneous M2 Max. A dynamic or size-weighted decomposition is the fix, and a
+good exercise.
 
 Benchmarking notes are in `examples/backend_comparison.jl`: GPUs need a *timed*
 warm-up (a step-count warm-up measures power-state transitions), CPUs need a

@@ -47,7 +47,23 @@ precision is a performance decision.
 julia --project=. -t auto examples/backend_comparison.jl
 ```
 
-Reference results, Apple M2 Max with 8 threads, Float32, MLUP/s:
+Reference results across three devices, Float32, MLUP/s (best CPU backend at
+each size):
+
+| grid | CPU | Metal | CUDA |
+|:-----|----:|------:|-----:|
+| 256² | 4 877 | 3 529 | 17 730 |
+| 512² | 6 217 | 7 034 | 57 100 |
+| 1024² | 8 309 | 7 534 | 88 386 |
+| 2048² | 15 389 | 7 342 | 97 019 |
+| 4096² | 15 050 | 7 011 | 56 381 |
+
+CPU and Metal are an Apple M2 Max (8 Julia threads); CUDA is an RTX 4070 SUPER
+in an i5-13600K host. The CUDA column is therefore *not* comparable to the CPU
+column — different machine. Against its own host CPU it runs 7.5x to 16.2x
+faster.
+
+Full per-backend breakdown, Apple M2 Max:
 
 | grid | `cpu` | `cpu x8` | `ka-cpu` | `metal` |
 |:-----|------:|---------:|---------:|--------:|
@@ -67,6 +83,10 @@ Questions:
 3. `ka-cpu` runs the GPU kernel on the CPU and is consistently slower than the
    hand-written CPU loop. What does the hand-written version do that the
    portable kernel cannot? (Look at `update_column!` in `src/kernels.jl`.)
+4. Metal peaks at 1.13x over the M2 Max CPU and *loses* at large grids, while
+   CUDA beats its host CPU by up to 16x. Both are GPUs with many more cores than
+   their CPUs. Since this kernel is memory bound, what does each GPU's memory
+   arrangement predict — and which number in the bandwidth table confirms it?
 
 ## Exercise 2: reading a bandwidth number that is impossible
 
