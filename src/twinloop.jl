@@ -253,9 +253,8 @@ innovation — easily mistaken for a modelling error, and expensive to find.
 """
 function check_cadence(model, sample_times, steps_per_window)
     length(sample_times) >= 2 || return nothing
-    hasproperty(model, :params) || return nothing
 
-    window = Float64(model.params.dt) * steps_per_window
+    window = Float64(timestep(model)) * steps_per_window
     spacing = sample_times[2] - sample_times[1]
     spacing > 0 || return nothing
 
@@ -264,11 +263,11 @@ function check_cadence(model, sample_times, steps_per_window)
               Observation cadence and simulated window length disagree.
 
               Observations are $(spacing) apart, but each window advances
-              $(steps_per_window) steps of dt=$(model.params.dt) = $(window) of simulated time.
+              $(steps_per_window) steps of dt=$(timestep(model)) = $(window) of simulated time.
 
               A time-varying boundary or source is evaluated at the model's clock, so it
               will drift out of step with the observations. Set steps_per_window to
-              $(round(Int, spacing / Float64(model.params.dt))) to match, or pass `times`
+              $(round(Int, spacing / Float64(timestep(model)))) to match, or pass `times`
               that follow the model's clock.
               """ maxlog = 1
     end
@@ -283,7 +282,7 @@ observation_stream(series::ObservationSeries, times, model, per_window) =
 function observation_stream(values::AbstractVector, ::Nothing, model, per_window)
     # Default cadence: one observation per window, so the k-th observation is at
     # the simulated time the k-th window starts.
-    window = Float64(model.params.dt) * per_window
+    window = Float64(timestep(model)) * per_window
     return (values, [window * (k - 1) for k in 1:length(values)])
 end
 

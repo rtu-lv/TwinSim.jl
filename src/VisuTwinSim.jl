@@ -61,6 +61,16 @@ export
     SampledSeries,
     is_driven,
     feedback_coefficient,
+    # model interface
+    AbstractModel,
+    timestep,
+    clock,
+    cells,
+    bytes_per_cell,
+    flops_per_cell,
+    move_to_device,
+    sync_state!,
+    check_model_interface,
     # model
     Heat2D,
     Heat2DParams,
@@ -134,6 +144,7 @@ include("boundary.jl")
 include("source.jl")
 include("field.jl")
 include("metrics.jl")
+include("model.jl")
 include("heat2d.jl")
 include("kernels.jl")
 include("stopping.jl")

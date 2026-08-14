@@ -40,6 +40,7 @@ end
 @testset "VisuTwinSim" begin
     include("test_field.jl")
     include("test_model.jl")
+    include("test_model_interface.jl")
     include("test_analytical.jl")
     include("test_source.jl")
     include("test_backends.jl")

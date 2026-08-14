@@ -39,28 +39,15 @@ device costs no transfer.
 """
 to_backend(model, backend::AbstractBackend) = first(upload(backend, model))
 
-function upload(backend::AbstractBackend, model::Heat2D{T}) where {T}
+function upload(backend::AbstractBackend, model::AbstractModel)
     device = ka_device(backend)
     device === nothing && return (model, 0.0, 0)
-    KernelAbstractions.get_backend(model.field.current) == device &&
-        return (model, 0.0, 0)
+    KernelAbstractions.get_backend(state(model)) == device && return (model, 0.0, 0)
 
     start = time_ns()
-    current = KernelAbstractions.allocate(device, T, size(model.field))
-    next = KernelAbstractions.allocate(device, T, size(model.field))
-    copyto!(current, model.field.current)
-
-    # A PatternSource carries a grid-sized array of its own, which has to travel
-    # with the field or the kernel would be indexing host memory from the device.
-    # CombinedSource may hold several, so the move recurses.
-    source, source_bytes = move_source_to_device(model.source, device)
-    bytes = sizeof(T) * length(model.field) + source_bytes
-
+    device_model, bytes = move_to_device(model, device)
     KernelAbstractions.synchronize(device)
-    elapsed = (time_ns() - start) / 1e9
-
-    device_model = Heat2D(Field2D(current, next), model.params, model.boundary, source, model.clock)
-    return (device_model, elapsed, bytes)
+    return (device_model, (time_ns() - start) / 1e9, bytes)
 end
 
 """
@@ -69,12 +56,12 @@ end
 Copy the live buffer back into `host`. A no-op — and free — when the two models
 are the same object, which is the case for every CPU backend.
 """
-function sync_to_host!(host::Heat2D, backend::AbstractBackend, device_model::Heat2D)
+function sync_to_host!(host::AbstractModel, backend::AbstractBackend,
+                       device_model::AbstractModel)
     host === device_model && return (0.0, 0)
     start = time_ns()
-    copyto!(host.field.current, device_model.field.current)
+    bytes = sync_state!(host, device_model)
     device_synchronize(backend)
-    bytes = sizeof(eltype(host)) * length(host.field)
     return ((time_ns() - start) / 1e9, bytes)
 end
 
@@ -105,7 +92,7 @@ pacing, and is measured after a device synchronise so GPU numbers reflect kernel
 execution rather than launch time. A [`Converged`](@ref) stop condition adds a
 grid-wide reduction that *is* counted as compute.
 """
-function run!(sim::Simulation{<:Heat2D};
+function run!(sim::Simulation{<:AbstractModel};
               callback = nothing,
               callback_every::Integer = 1,
               realtime_factor::Union{Nothing,Real} = nothing,
@@ -118,7 +105,7 @@ function run!(sim::Simulation{<:Heat2D};
 
     metrics = RunMetrics(backend = backend_name(backend),
                          precision = T,
-                         cells = length(host.field),
+                         cells = cells(host),
                          bytes_per_cell = bytes_per_cell(host),
                          flops_per_cell = flops_per_cell(host))
 
@@ -128,23 +115,23 @@ function run!(sim::Simulation{<:Heat2D};
     metrics.transferred_bytes += upload_bytes
 
     interval = change_interval(sim.stop)
-    snapshot = tracks_change(sim.stop) ? copy(model.field.current) : nothing
+    snapshot = tracks_change(sim.stop) ? copy(state(model)) : nothing
 
-    dt = Float64(host.params.dt)
+    dt = Float64(timestep(host))
     # Continue from where the model left off, so a driven model advanced in
     # windows sees a monotonic clock instead of replaying its first window.
-    started_at = host.clock[]
-    state = RunState(started_at)
+    started_at = clock(host)[]
+    progress = RunState(started_at)
     excluded_ns = 0  # callback + transfer + pacing time, subtracted from compute
 
     loop_start = time_ns()
     while true
-        reason = stop_reason(sim.stop, state)
+        reason = stop_reason(sim.stop, progress)
         if reason !== nothing
             metrics.stopped_by = reason
             break
         end
-        if state.step >= step_limit
+        if progress.step >= step_limit
             metrics.stopped_by = :step_limit
             @warn "run! hit step_limit=$step_limit before any stop condition fired" sim.stop
             break
@@ -153,22 +140,22 @@ function run!(sim::Simulation{<:Heat2D};
         # The drive is evaluated at the time *entering* the step, so the first
         # step sees t = 0 and the series is sampled at the same instants the
         # state is reported at.
-        step!(backend, model, oftype(dt, state.simulated_time))
-        state.step += 1
-        state.simulated_time += dt
+        step!(backend, model, oftype(dt, progress.simulated_time))
+        progress.step += 1
+        progress.simulated_time += dt
 
-        if snapshot !== nothing && state.step % interval == 0
-            current = model.field.current
-            state.max_change = Float64(maximum(abs, current .- snapshot))
+        if snapshot !== nothing && progress.step % interval == 0
+            current = state(model)
+            progress.max_change = Float64(maximum(abs, current .- snapshot))
             copyto!(snapshot, current)
         end
 
-        if callback !== nothing && state.step % callback_every == 0
+        if callback !== nothing && progress.step % callback_every == 0
             pause = time_ns()
             seconds, bytes = sync_to_host!(host, backend, model)
             metrics.transfer_seconds += seconds
             metrics.transferred_bytes += bytes
-            verdict = callback(host, state)
+            verdict = callback(host, progress)
             excluded_ns += time_ns() - pause
             if verdict === :stop
                 metrics.stopped_by = :callback
@@ -180,7 +167,7 @@ function run!(sim::Simulation{<:Heat2D};
             # Paced against what *this* run has advanced: the wall clock below
             # also starts at this call, so an absolute simulated time would make
             # a chained run think it was already far behind.
-            target = advanced(state) / realtime_factor
+            target = advanced(progress) / realtime_factor
             achieved = (time_ns() - loop_start) / 1e9
             if target > achieved
                 pause = time_ns()
@@ -189,7 +176,7 @@ function run!(sim::Simulation{<:Heat2D};
             end
         end
 
-        state.elapsed_seconds = (time_ns() - loop_start) / 1e9
+        progress.elapsed_seconds = (time_ns() - loop_start) / 1e9
     end
 
     # Only after synchronising does the elapsed time mean anything on a GPU:
@@ -202,16 +189,16 @@ function run!(sim::Simulation{<:Heat2D};
     metrics.transfer_seconds += seconds
     metrics.transferred_bytes += bytes
 
-    metrics.steps = state.step
+    metrics.steps = progress.step
     # The metrics report what *this* run advanced; the model keeps the total.
-    metrics.simulated_time = state.simulated_time - started_at
-    host.clock[] = state.simulated_time
+    metrics.simulated_time = progress.simulated_time - started_at
+    clock(host)[] = progress.simulated_time
     metrics.total_state = Float64(sum_state(model))
     metrics.elapsed_seconds = (time_ns() - wall_start) / 1e9
     return metrics
 end
 
-function run!(model::Heat2D; backend::AbstractBackend = CPUBackend(), steps = 1, kwargs...)
+function run!(model::AbstractModel; backend::AbstractBackend = CPUBackend(), steps = 1, kwargs...)
     return run!(Simulation(model; backend, stop = as_stop_condition(steps)); kwargs...)
 end
 

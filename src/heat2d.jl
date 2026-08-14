@@ -124,7 +124,7 @@ The parameter element type follows the field element type, so
 `check_stability = false` disables the CFL check, which is how the lab on
 numerical stability produces a deliberately diverging run.
 """
-struct Heat2D{T,F<:Field2D{T},P<:Heat2DParams{T},B<:BoundaryCondition,S<:SourceTerm}
+struct Heat2D{T,F<:Field2D{T},P<:Heat2DParams{T},B<:BoundaryCondition,S<:SourceTerm} <: AbstractModel
     field::F
     params::P
     boundary::B
@@ -192,7 +192,10 @@ Base.size(model::Heat2D) = size(model.field)
 Base.size(model::Heat2D, dim::Integer) = size(model.field, dim)
 Base.eltype(::Heat2D{T}) where {T} = T
 
+# The AbstractModel contract. Everything else the runtime needs has a default.
 state(model::Heat2D) = state(model.field)
+timestep(model::Heat2D) = model.params.dt
+clock(model::Heat2D) = model.clock
 sum_state(model::Heat2D) = sum_state(model.field)
 center_value(model::Heat2D) = center_value(model.field)
 """
@@ -213,27 +216,7 @@ results depend on *when* it was run, not only on how many steps.
 """
 is_driven(model::Heat2D) = is_driven(model.boundary) || is_driven(model.source)
 
-"""
-    simulated_time(model) -> Float64
 
-The model's simulated clock: how far it has been advanced in total, across every
-`run!` so far.
-
-A time-varying boundary or source is evaluated against this, so two runs of 50
-steps see the same drive as one run of 100.
-"""
-simulated_time(model::Heat2D) = model.clock[]
-
-"""
-    reset_clock!(model, t = 0.0) -> model
-
-Set the simulated clock. Use it to start a driven model part-way into its drive,
-or to replay a window.
-"""
-function reset_clock!(model::Heat2D, t::Real = 0.0)
-    model.clock[] = Float64(t)
-    return model
-end
 
 """
     bytes_per_cell(model) -> Int
@@ -274,4 +257,26 @@ function Base.show(io::IO, ::MIME"text/plain", model::Heat2D)
     is_driven(model.boundary) && println(io, "  boundary is time-varying")
     print(io, "  CFL       ", cfl_number(model), is_stable(model) ? " (stable)" : " (UNSTABLE)")
     return nothing
+end
+
+"""
+    move_to_device(model::Heat2D, device) -> (model, bytes)
+
+Relocate the field and any grid-sized source arrays onto `device`, sharing the
+clock so host and device copies stay on the same simulated time.
+"""
+function move_to_device(model::Heat2D{T}, device) where {T}
+    current = KernelAbstractions.allocate(device, T, size(model.field))
+    next = KernelAbstractions.allocate(device, T, size(model.field))
+    copyto!(current, model.field.current)
+
+    # A PatternSource carries a grid-sized array of its own, which has to travel
+    # with the field or the kernel would index host memory from the device.
+    # CombinedSource may hold several, so the move recurses.
+    source, source_bytes = move_source_to_device(model.source, device)
+    bytes = sizeof(T) * length(model.field) + source_bytes
+
+    device_model = Heat2D(Field2D(current, next), model.params, model.boundary,
+                          source, model.clock)
+    return (device_model, bytes)
 end
