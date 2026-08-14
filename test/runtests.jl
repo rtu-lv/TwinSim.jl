@@ -33,5 +33,7 @@ end
     include("test_backends.jl")
     include("test_runtime.jl")
     include("test_twin.jl")
+    include("test_monitoring.jl")
+    include("test_sweep.jl")
     include("test_ensemble.jl")
 end

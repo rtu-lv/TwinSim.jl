@@ -129,15 +129,25 @@ struct Heat2D{T,F<:Field2D{T},P<:Heat2DParams{T},B<:BoundaryCondition,S<:SourceT
     params::P
     boundary::B
     source::S
+    # The model's own simulated clock, so that successive `run!` calls continue
+    # rather than restarting. A `Ref` keeps the struct immutable while letting the
+    # clock advance — and lets a device-resident copy share the same clock object.
+    #
+    # Without this a driven model advanced in windows replays the same slice of
+    # its drive forever: `run!(m; steps=3)` three times evaluated the boundary at
+    # t = 0.0, 0.1, 0.2 on all three calls. Every windowed pattern in the package
+    # — `twin_run!` above all — depends on the clock persisting.
+    clock::Base.RefValue{Float64}
 
     # Written out rather than relying on the auto-generated constructor: `T` only
     # appears inside the other type parameters, so spelling the inference out
     # keeps the error message readable when a field and its parameters disagree.
     function Heat2D(field::Field2D{T}, params::Heat2DParams{T},
                     boundary::BoundaryCondition,
-                    source::SourceTerm = NoSource()) where {T}
+                    source::SourceTerm = NoSource(),
+                    clock::Base.RefValue{Float64} = Ref(0.0)) where {T}
         return new{T,typeof(field),typeof(params),typeof(boundary),typeof(source)}(
-            field, params, boundary, source)
+            field, params, boundary, source, clock)
     end
 end
 
@@ -202,6 +212,28 @@ Whether anything in the model depends on simulated time. A driven model's
 results depend on *when* it was run, not only on how many steps.
 """
 is_driven(model::Heat2D) = is_driven(model.boundary) || is_driven(model.source)
+
+"""
+    simulated_time(model) -> Float64
+
+The model's simulated clock: how far it has been advanced in total, across every
+`run!` so far.
+
+A time-varying boundary or source is evaluated against this, so two runs of 50
+steps see the same drive as one run of 100.
+"""
+simulated_time(model::Heat2D) = model.clock[]
+
+"""
+    reset_clock!(model, t = 0.0) -> model
+
+Set the simulated clock. Use it to start a driven model part-way into its drive,
+or to replay a window.
+"""
+function reset_clock!(model::Heat2D, t::Real = 0.0)
+    model.clock[] = Float64(t)
+    return model
+end
 
 """
     bytes_per_cell(model) -> Int

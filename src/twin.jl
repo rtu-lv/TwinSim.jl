@@ -132,7 +132,7 @@ models are copied to the host first.
 See [`load_state`](@ref) for reading it back.
 """
 function save_state(path::AbstractString, model::Heat2D{T};
-                    step::Integer = 0, simulated_time::Real = 0.0) where {T}
+                    step::Integer = 0, simulated_time::Real = model.clock[]) where {T}
     haskey(ELTYPE_TAGS, T) ||
         throw(ArgumentError("checkpoints support Float32 and Float64, got $T"))
     data = model.field.current

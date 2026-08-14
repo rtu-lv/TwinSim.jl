@@ -60,6 +60,8 @@ RunMetrics
 | Runtime | `Simulation`, `Steps`, `UntilTime`, `Converged`, `WallClock`, `AnyOf` | how long it runs |
 | Metrics | `RunMetrics`, `mlups`, `bandwidth_gbs`, `arithmetic_intensity` | what it cost |
 | Twin | `Sensor`, `nudge!`, `save_state`, `load_state` | connecting it to a real system |
+| Monitoring | `synthetic_series`, `TwinLoop`, `detection_report`, `MetricRecorder` | noticing when the system stops matching |
+| Scenarios | `parameter_sweep`, `random_walk_ensemble` | many runs instead of one |
 
 ### Backends
 
@@ -228,6 +230,84 @@ that lowering the gain is visible as a fix alongside reducing `dt`.
 Pass `check_stability = false` to explore the instability deliberately; see
 `examples/stability_cfl.jl`.
 
+## The twin runtime
+
+A simulation becomes a twin when it runs a loop that stays synchronised with
+something outside itself and produces an output somebody acts on. `TwinLoop` is
+that loop, with the four stages named:
+
+```julia
+observed = synthetic_series(samples = 120, anomalies = [LevelShift(70, 6.0)], seed = 42)
+
+loop = TwinLoop(
+    assimilate = (m, obs, t) -> nudge!(m, [Sensor(24, 24, Float32(obs))]; gain = 0.5, radius = 4),
+    validate   = (m, obs, t) -> (; innovation = obs - Float64(m.field[24, 24])),
+    decide     = (m, checks, t) -> abs(checks.innovation) > 2.0 ? :alarm : :ok,
+    steps_per_window = 50,
+)
+
+log = twin_run!(loop, model, observed)
+report = detection_report([c.innovation for c in log.checks], observed.anomalous, 2.0)
+```
+
+Every stage defaults to a no-op, so the skeleton runs before any of it is filled
+in. `synthetic_series` generates observation data with faults whose location it
+records, so detection can be scored rather than eyeballed — `Spike`,
+`LevelShift`, `Drift` and `Stuck`, which are deliberately not equally detectable.
+
+`MetricRecorder` is the in-situ counterpart: it computes named reductions during
+a run and keeps only those, discarding the field.
+
+```julia
+recorder = MetricRecorder(mean = m -> sum(state(m)) / length(m.field),
+                          coldest = m -> minimum(state(m)))
+run!(sim; callback = recorder, callback_every = 50)
+```
+
+Two findings from `examples/monitoring_twin.jl` that are easier to hit than to
+anticipate:
+
+- **Where the check sits matters.** `check = :forecast` (the default) validates
+  the prediction *before* assimilating, so the residual is the innovation.
+  `check = :analysis` validates afterwards, and reports how well the correction
+  fitted rather than whether anything is wrong.
+- **How hard you assimilate matters more.** Peak innovation after an injected
+  heater failure: 23.2 with no assimilation, 8.3 at gain 0.15, 2.6 at gain 0.6.
+  A twin tuned to track well is by construction a twin that reports small
+  residuals — and residual size is what the monitoring rule keys on. If a twin
+  must both track and monitor, watch how hard the correction is pulling, not how
+  small the residual ends up.
+
+### Scenarios
+
+```julia
+results = parameter_sweep([0.05f0, 0.1f0, 0.15f0, 0.2f0]; threaded = true) do alpha
+    model = Heat2D(nx = 128, ny = 128, alpha = alpha)
+    initialize_peak!(model.field, 100.0f0)
+    model
+end
+println(sweep_table(results))
+```
+
+Scenarios are independent, so this is the second embarrassingly parallel
+workload in the package — and a more realistic one than the random walk, since
+each task is large enough that the parallelism pays. Threading is *refused* on
+GPU backends rather than silently ignored: several host threads submitting to one
+device do not get more of it.
+
+### The simulated clock
+
+A model carries its own clock, so successive runs continue rather than restart:
+
+```julia
+run!(model; steps = 50); run!(model; steps = 50)   # sees the same drive as one run of 100
+simulated_time(model)                              # 10.0 with dt = 0.1
+```
+
+This is what makes windowed twin runs work. It also means `UntilTime` targets an
+**absolute** time — use `ForDuration` to advance a further interval from wherever
+the clock stands.
+
 ## Measured performance
 
 Regenerate all of this on your own machine with:
@@ -370,6 +450,7 @@ docs/labs/           lab notes
 | `driven_heat.jl` | a model driven by weather and a control law; timescale separation |
 | `stability_cfl.jl` | what exceeding the CFL limit actually does |
 | `digital_twin.jl` | assimilation, real-time pacing, checkpoint and restart |
+| `monitoring_twin.jl` | fault detection, threshold trade-off, why assimilation hides faults |
 | `random_walk_ensemble.jl` | reproducible parallel Monte Carlo |
 
 ## Tests

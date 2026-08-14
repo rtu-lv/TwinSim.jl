@@ -32,6 +32,7 @@ export
     CUDADevice,
     MetalDevice,
     ROCmDevice,
+    RawCUDABackend,
     available_backends,
     backend_name,
     is_gpu,
@@ -67,11 +68,13 @@ export
     stability_number,
     is_stable,
     max_stable_dt,
+    reset_clock!,
     # runtime
     Simulation,
     StopCondition,
     Steps,
     UntilTime,
+    ForDuration,
     WallClock,
     Converged,
     AnyOf,
@@ -91,6 +94,29 @@ export
     save_state,
     load_state,
     checkpoint_callback,
+    # observation data and monitoring
+    Anomaly,
+    Spike,
+    LevelShift,
+    Drift,
+    Stuck,
+    ObservationSeries,
+    synthetic_series,
+    flag_exceedances,
+    DetectionReport,
+    detection_report,
+    threshold_sweep,
+    MetricRecorder,
+    # twin runtime
+    TwinLoop,
+    TwinLog,
+    twin_run!,
+    realtime_ratio,
+    compute_seconds,
+    simulated_time,
+    # scenarios
+    parameter_sweep,
+    sweep_table,
     # ensemble
     random_walk_ensemble
 
@@ -104,6 +130,11 @@ include("kernels.jl")
 include("stopping.jl")
 include("runtime.jl")
 include("twin.jl")
+include("series.jl")
+include("detection.jl")
+include("recorder.jl")
+include("twinloop.jl")
+include("sweep.jl")
 include("ensemble.jl")
 
 end # module VisuTwinSim

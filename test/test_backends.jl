@@ -54,6 +54,65 @@ end
     end
 end
 
+@testset "RawCUDABackend" begin
+    @test backend_name(RawCUDABackend()) === :cuda_raw
+    @test is_gpu(RawCUDABackend())
+    @test RawCUDABackend().threads == (16, 16)
+    @test RawCUDABackend(threads = (32, 8)).threads == (32, 8)
+    @test_throws ArgumentError RawCUDABackend(threads = (0, 16))
+    @test_throws ArgumentError RawCUDABackend(threads = (64, 64))   # 4096 > 1024
+
+    if Base.identify_package("CUDA") === nothing
+        # Without CUDA loaded it must fail with a message that says so.
+        err = try
+            run!(Heat2D(nx = 8); backend = RawCUDABackend(), steps = 1)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("CUDA", sprint(showerror, err))
+    else
+        # The hand-written launch must agree with the portable kernel exactly —
+        # they share `heat_update`, so only the launch differs.
+        pattern = zeros(Float32, 40, 40)
+        pattern[10, 10] = 1.5f0
+
+        for kwargs in ((;),
+                       (; boundary = Dirichlet(2.0f0)),
+                       (; boundary = Periodic()),
+                       (; boundary = Dirichlet(t -> 3.0f0 * sin(t))),
+                       (; source = PatternSource(copy(pattern), 0.4f0)),
+                       (; source = ProportionalSource(8.0f0, 1.5f0)))
+            reference = Heat2D(nx = 40, ny = 40; kwargs...)
+            initialize_peak!(reference.field, 60.0f0)
+            run!(reference; backend = CPUBackend(), steps = 150)
+
+            for threads in ((16, 16), (32, 8), (8, 32))
+                model = Heat2D(nx = 40, ny = 40; kwargs...)
+                initialize_peak!(model.field, 60.0f0)
+                metrics = run!(model; backend = RawCUDABackend(threads = threads), steps = 150)
+                @test Array(state(model)) ≈ Array(state(reference)) rtol = 1e-4 atol = 1e-5
+                @test metrics.backend === :cuda_raw
+            end
+        end
+
+        # Grid not a multiple of the block size: the bounds guard is doing work.
+        odd_reference = Heat2D(nx = 37, ny = 23)
+        initialize_peak!(odd_reference.field, 20.0f0)
+        run!(odd_reference; backend = CPUBackend(), steps = 100)
+        odd = Heat2D(nx = 37, ny = 23)
+        initialize_peak!(odd.field, 20.0f0)
+        run!(odd; backend = RawCUDABackend(), steps = 100)
+        @test Array(state(odd)) ≈ Array(state(odd_reference)) rtol = 1e-4 atol = 1e-5
+
+        # It gets host/device movement and residency from the shared machinery.
+        resident = to_backend(Heat2D(nx = 32, ny = 32), RawCUDABackend())
+        @test !(state(resident) isa Array)
+        @test run!(resident; backend = RawCUDABackend(), steps = 20).transferred_bytes == 0
+    end
+end
+
 @testset "threading does not change the result" begin
     # Guards against a race in the column decomposition: with a shared `next`
     # buffer and a real double buffer swap, threads never read what another

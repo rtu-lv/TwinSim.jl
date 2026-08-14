@@ -79,8 +79,49 @@ end
     @test Array(state(model))[1, 1] ≈ schedule(49 * 0.1f0) rtol = 1e-4
 
     # Continuing the run continues the clock rather than restarting it.
+    #
+    # The obvious check here — that the edge equals schedule(49*dt) again — is
+    # vacuous: it holds whether the clock continued or restarted, because both
+    # end 49 steps after their own start. Assert on the *clock* instead.
+    @test simulated_time(model) ≈ 5.0 rtol = 1e-4
     run!(model; steps = 50)
-    @test Array(state(model))[1, 1] ≈ schedule(49 * 0.1f0) rtol = 1e-4
+    @test simulated_time(model) ≈ 10.0 rtol = 1e-4
+    @test Array(state(model))[1, 1] ≈ schedule(99 * 0.1f0) rtol = 1e-4
+end
+
+@testset "the simulated clock persists across run! calls" begin
+    # Regression: run! used to restart the clock every call, so a driven model
+    # advanced in windows replayed the same slice of its drive forever.
+    seen = Float64[]
+    probe(t) = (push!(seen, Float64(t)); 0.0f0)
+    model = Heat2D(nx = 8, ny = 8, dt = 0.1f0; boundary = Dirichlet(probe))
+
+    run!(model; steps = 3)
+    run!(model; steps = 3)
+    run!(model; steps = 3)
+
+    @test length(seen) == 9
+    @test issorted(seen)
+    @test seen[1] ≈ 0.0
+    @test seen[4] ≈ 0.3 rtol = 1e-4      # the second call continues
+    @test seen[7] ≈ 0.6 rtol = 1e-4
+    @test simulated_time(model) ≈ 0.9 rtol = 1e-4
+
+    # Two runs of 50 see the same drive as one run of 100.
+    chained = Heat2D(nx = 8, ny = 8, dt = 0.1f0; boundary = Dirichlet(t -> Float32(10t)))
+    run!(chained; steps = 50); run!(chained; steps = 50)
+    single = Heat2D(nx = 8, ny = 8, dt = 0.1f0; boundary = Dirichlet(t -> Float32(10t)))
+    run!(single; steps = 100)
+    @test Array(state(chained)) == Array(state(single))
+
+    # metrics report what the individual run advanced, not the absolute clock.
+    @test run!(chained; steps = 10).simulated_time ≈ 1.0 rtol = 1e-4
+    @test simulated_time(chained) ≈ 11.0 rtol = 1e-4
+
+    reset_clock!(chained, 2.5)
+    @test simulated_time(chained) ≈ 2.5
+    reset_clock!(chained)
+    @test simulated_time(chained) == 0.0
 end
 
 @testset "time-varying source" begin

@@ -99,7 +99,10 @@ checkpoint_dir = mktempdir()
 twin = best.twin
 
 println("\nRunning the twin in real time (1 unit of simulated time per second):")
-metrics = run!(Simulation(twin; stop = UntilTime(twin.params.dt * 30));
+# ForDuration, not UntilTime. The twin's clock is already well past zero from the
+# tracking loop above, and UntilTime is absolute — an absolute target in the past
+# would stop the run before it took a single step.
+metrics = run!(Simulation(twin; stop = ForDuration(twin.params.dt * 30));
                realtime_factor = 1.0,
                callback = checkpoint_callback(joinpath(checkpoint_dir, "twin_%05d.vts")),
                callback_every = 10)

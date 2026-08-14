@@ -70,6 +70,42 @@ MetalDevice() = KernelBackend(gpu_device(Val(:metal)))
 """
 ROCmDevice() = KernelBackend(gpu_device(Val(:rocm)))
 
+"""
+    RawCUDABackend(; threads = (16, 16))
+
+The same stencil, launched by hand with `@cuda` instead of through
+KernelAbstractions. Requires `using CUDA`.
+
+This backend exists for teaching, not for speed. `KernelBackend`/`CUDADevice` is
+the one to use in practice; this one is here so that a lecture on CUDA can read
+an explicit kernel — `blockIdx`, `blockDim`, `threadIdx`, a launch geometry, and
+a stream synchronisation — rather than an abstraction over one.
+
+It deliberately shares [`heat_update`](@ref) with the portable kernel. Only the
+*launch* is hand-written, so any difference in results is a bug in the launch,
+and the comparison between the two is about how the work is dispatched rather
+than about two people's arithmetic.
+
+```julia
+using VisuTwinSim, CUDA
+run!(model; backend = RawCUDABackend(threads = (32, 8)), steps = 100)
+```
+"""
+struct RawCUDABackend <: AbstractBackend
+    threads::Tuple{Int,Int}
+end
+
+function RawCUDABackend(; threads::Tuple{Integer,Integer} = (16, 16))
+    all(>(0), threads) || throw(ArgumentError("thread block dimensions must be positive, got $threads"))
+    prod(threads) <= 1024 || throw(ArgumentError(
+        "a CUDA thread block may hold at most 1024 threads, got $(prod(threads)) from $threads"))
+    return RawCUDABackend((Int(threads[1]), Int(threads[2])))
+end
+
+backend_name(::RawCUDABackend) = :cuda_raw
+is_gpu(::RawCUDABackend) = true
+workgroup_size(backend::RawCUDABackend) = backend.threads
+
 const GPU_PACKAGES = (cuda = "CUDA", metal = "Metal", rocm = "AMDGPU")
 
 """
@@ -128,14 +164,33 @@ is_gpu(::CPUBackend) = false
 is_gpu(backend::KernelBackend) = !(backend.device isa KernelAbstractions.CPU)
 
 """
+    ka_device(backend) -> device or nothing
+
+The KernelAbstractions device a backend allocates and synchronises through, or
+`nothing` when it works directly in host memory.
+
+Host/device movement is written against this rather than against a specific
+backend type, so a backend that launches its own kernels — `RawCUDABackend` —
+still gets uploads, downloads and residency for free.
+"""
+ka_device(::CPUBackend) = nothing
+ka_device(backend::KernelBackend) = backend.device
+# Routed through the same hole the device helpers use, so the CUDA extension
+# fills it by adding a `gpu_device` method rather than overwriting one here.
+ka_device(::RawCUDABackend) = gpu_device(Val(:cuda))
+
+"""
     device_synchronize(backend)
 
 Block until all work queued on the backend has finished. Timing a GPU run
 without this measures kernel *launch* time, not kernel execution time — one of
 the classic first mistakes when benchmarking GPU code.
 """
-device_synchronize(::CPUBackend) = nothing
-device_synchronize(backend::KernelBackend) = KernelAbstractions.synchronize(backend.device)
+function device_synchronize(backend::AbstractBackend)
+    device = ka_device(backend)
+    device === nothing || KernelAbstractions.synchronize(device)
+    return nothing
+end
 
 """
     workgroup_size(backend) -> Tuple

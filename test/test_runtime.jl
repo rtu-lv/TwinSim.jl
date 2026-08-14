@@ -150,3 +150,39 @@ end
     @test occursin("Simulation", text)
     @test occursin("cpu", text)
 end
+
+@testset "UntilTime is absolute, ForDuration is relative" begin
+    @test_throws ArgumentError ForDuration(-1.0)
+
+    # UntilTime targets the model's own clock, which persists across runs.
+    model = Heat2D(nx = 16, ny = 16, dt = 0.1f0)
+    @test run!(Simulation(model; stop = UntilTime(4.0))).steps == 40
+    @test simulated_time(model) ≈ 4.0 rtol = 1e-4
+    # Already past the target: stops without stepping rather than running again.
+    second = run!(Simulation(model; stop = UntilTime(4.0)))
+    @test second.steps == 0
+    @test second.stopped_by === :time
+    # A later absolute target advances only the difference.
+    @test run!(Simulation(model; stop = UntilTime(6.0))).steps == 20
+
+    # ForDuration advances the same interval from wherever the clock stands.
+    windowed = Heat2D(nx = 16, ny = 16, dt = 0.1f0)
+    for window in 1:3
+        metrics = run!(Simulation(windowed; stop = ForDuration(2.0)))
+        @test metrics.steps == 20
+        @test metrics.stopped_by === :duration
+        @test metrics.simulated_time ≈ 2.0 rtol = 1e-4        # this run advanced 2.0
+        @test simulated_time(windowed) ≈ 2.0 * window rtol = 1e-4   # the clock accumulates
+    end
+end
+
+@testset "checkpoints carry the simulated clock" begin
+    path = joinpath(mktempdir(), "clocked.vts")
+    model = Heat2D(nx = 12, ny = 12, dt = 0.1f0)
+    run!(model; steps = 70)
+    @test simulated_time(model) ≈ 7.0 rtol = 1e-4
+
+    save_state(path, model; step = 70)          # defaults to the model's clock
+    restored = load_state(path)
+    @test restored.simulated_time ≈ 7.0 rtol = 1e-4
+end

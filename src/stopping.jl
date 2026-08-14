@@ -31,9 +31,14 @@ end
 """
     UntilTime(time)
 
-Stop once the simulated time reaches `time`. Unlike a step count this is
+Stop once the model's simulated clock reaches `time`. Unlike a step count this is
 independent of `dt`, so refining the time step no longer changes what is being
 compared.
+
+The clock is **absolute**: it is the model's own clock, which persists across
+`run!` calls (see [`simulated_time`](@ref)). A model already past `time` stops
+immediately without stepping. To advance a further interval from wherever the
+model happens to be, use [`ForDuration`](@ref).
 """
 struct UntilTime{T<:Real} <: StopCondition
     time::T
@@ -41,6 +46,25 @@ struct UntilTime{T<:Real} <: StopCondition
     function UntilTime(time::T) where {T<:Real}
         time >= 0 || throw(ArgumentError("stop time must be non-negative, got $time"))
         return new{T}(time)
+    end
+end
+
+"""
+    ForDuration(duration)
+
+Advance `duration` of simulated time from wherever the model's clock currently
+stands.
+
+This is the windowed counterpart to [`UntilTime`](@ref), and the one a twin loop
+usually wants: each window advances the same interval regardless of how much
+simulated time has already accumulated.
+"""
+struct ForDuration{T<:Real} <: StopCondition
+    duration::T
+
+    function ForDuration(duration::T) where {T<:Real}
+        duration >= 0 || throw(ArgumentError("duration must be non-negative, got $duration"))
+        return new{T}(duration)
     end
 end
 
@@ -99,12 +123,20 @@ Progress passed to the stop conditions on every iteration.
 """
 mutable struct RunState
     step::Int
-    simulated_time::Float64
+    simulated_time::Float64      # absolute: the model's clock
+    started_at::Float64          # what it was when this run began
     elapsed_seconds::Float64
     max_change::Float64
 end
 
-RunState() = RunState(0, 0.0, 0.0, Inf)
+RunState(started_at::Real = 0.0) = RunState(0, Float64(started_at), Float64(started_at), 0.0, Inf)
+
+"""
+    advanced(state) -> Float64
+
+Simulated time this run has added, as opposed to the absolute clock.
+"""
+advanced(state::RunState) = state.simulated_time - state.started_at
 
 """
     stop_reason(condition, state) -> Union{Symbol,Nothing}
@@ -115,6 +147,7 @@ step cap is distinguishable from one that actually converged.
 """
 stop_reason(c::Steps, state::RunState) = state.step >= c.count ? :steps : nothing
 stop_reason(c::UntilTime, state::RunState) = state.simulated_time >= c.time ? :time : nothing
+stop_reason(c::ForDuration, state::RunState) = advanced(state) >= c.duration ? :duration : nothing
 stop_reason(c::WallClock, state::RunState) = state.elapsed_seconds >= c.seconds ? :wallclock : nothing
 stop_reason(c::Converged, state::RunState) = state.max_change <= c.tol ? :converged : nothing
 

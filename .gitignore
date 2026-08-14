@@ -4,3 +4,6 @@ Manifest.toml
 *.jl.*.cov
 coverage/
 docs/build/
+
+/.quarto/
+**/*.quarto_ipynb

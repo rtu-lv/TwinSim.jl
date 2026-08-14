@@ -39,13 +39,12 @@ device costs no transfer.
 """
 to_backend(model, backend::AbstractBackend) = first(upload(backend, model))
 
-upload(::CPUBackend, model::Heat2D) = (model, 0.0, 0)
-
-function upload(backend::KernelBackend, model::Heat2D{T}) where {T}
-    KernelAbstractions.get_backend(model.field.current) == backend.device &&
+function upload(backend::AbstractBackend, model::Heat2D{T}) where {T}
+    device = ka_device(backend)
+    device === nothing && return (model, 0.0, 0)
+    KernelAbstractions.get_backend(model.field.current) == device &&
         return (model, 0.0, 0)
 
-    device = backend.device
     start = time_ns()
     current = KernelAbstractions.allocate(device, T, size(model.field))
     next = KernelAbstractions.allocate(device, T, size(model.field))
@@ -60,7 +59,7 @@ function upload(backend::KernelBackend, model::Heat2D{T}) where {T}
     KernelAbstractions.synchronize(device)
     elapsed = (time_ns() - start) / 1e9
 
-    device_model = Heat2D(Field2D(current, next), model.params, model.boundary, source)
+    device_model = Heat2D(Field2D(current, next), model.params, model.boundary, source, model.clock)
     return (device_model, elapsed, bytes)
 end
 
@@ -132,7 +131,10 @@ function run!(sim::Simulation{<:Heat2D};
     snapshot = tracks_change(sim.stop) ? copy(model.field.current) : nothing
 
     dt = Float64(host.params.dt)
-    state = RunState()
+    # Continue from where the model left off, so a driven model advanced in
+    # windows sees a monotonic clock instead of replaying its first window.
+    started_at = host.clock[]
+    state = RunState(started_at)
     excluded_ns = 0  # callback + transfer + pacing time, subtracted from compute
 
     loop_start = time_ns()
@@ -175,7 +177,10 @@ function run!(sim::Simulation{<:Heat2D};
         end
 
         if realtime_factor !== nothing
-            target = state.simulated_time / realtime_factor
+            # Paced against what *this* run has advanced: the wall clock below
+            # also starts at this call, so an absolute simulated time would make
+            # a chained run think it was already far behind.
+            target = advanced(state) / realtime_factor
             achieved = (time_ns() - loop_start) / 1e9
             if target > achieved
                 pause = time_ns()
@@ -198,7 +203,9 @@ function run!(sim::Simulation{<:Heat2D};
     metrics.transferred_bytes += bytes
 
     metrics.steps = state.step
-    metrics.simulated_time = state.simulated_time
+    # The metrics report what *this* run advanced; the model keeps the total.
+    metrics.simulated_time = state.simulated_time - started_at
+    host.clock[] = state.simulated_time
     metrics.total_state = Float64(sum_state(model))
     metrics.elapsed_seconds = (time_ns() - wall_start) / 1e9
     return metrics
