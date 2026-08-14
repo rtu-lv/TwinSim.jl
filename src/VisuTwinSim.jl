@@ -54,12 +54,17 @@ export
     NoSource,
     UniformSource,
     PatternSource,
+    ProportionalSource,
+    CombinedSource,
+    ControlSignal,
     TimeSeries,
     is_driven,
+    feedback_coefficient,
     # model
     Heat2D,
     Heat2DParams,
     cfl_number,
+    stability_number,
     is_stable,
     max_stable_dt,
     # runtime

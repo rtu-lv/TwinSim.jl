@@ -55,7 +55,7 @@ RunMetrics
 |:--------|:-----|:--------|
 | Model | `Heat2D`, `Heat2DParams` | what is simulated |
 | Boundary | `Neumann`, `Periodic`, `Dirichlet` | how the domain edge behaves |
-| Forcing | `NoSource`, `UniformSource`, `PatternSource`, `TimeSeries` | what drives it from outside |
+| Forcing | `NoSource`, `UniformSource`, `PatternSource`, `ProportionalSource`, `TimeSeries`, `ControlSignal` | what drives it from outside |
 | Backend | `CPUBackend`, `KernelBackend`, `CUDADevice`, `MetalDevice`, `ROCmDevice` | where it runs |
 | Runtime | `Simulation`, `Steps`, `UntilTime`, `Converged`, `WallClock`, `AnyOf` | how long it runs |
 | Metrics | `RunMetrics`, `mlups`, `bandwidth_gbs`, `arithmetic_intensity` | what it cost |
@@ -119,6 +119,17 @@ du/dt = alpha * laplacian(u) + q(x, y, t)
 | `NoSource()` | `0` | closed system (default); compiles away entirely |
 | `UniformSource(rate)` | `rate` everywhere | ambient gain or loss |
 | `PatternSource(pattern, rate)` | `rate * pattern[i,j]` | heaters, pipes, any fixed layout |
+| `ProportionalSource(target, gain)` | `gain * (target - u[i,j])` | Newton cooling; a per-cell thermostat |
+
+Sources add with `+`, because a real installation has heaters *and* ambient loss:
+
+```julia
+source = PatternSource(layout, demand) + ProportionalSource(outdoor, 0.3f0)
+```
+
+Their rates are summed and applied once, not applied in sequence — with a
+state-dependent term in the mix those differ, and sequencing would make the
+result depend on the order you wrote them in.
 
 Anywhere a value is accepted, a **callable of simulated time** is too:
 
@@ -137,13 +148,38 @@ scalar per step that can come from a measurement series. Time-dependent values
 are evaluated once per step on the host, because a GPU kernel cannot call a
 Julia closure and would not want to re-evaluate one scalar in a million threads.
 
-Two consequences worth stating in a report:
+### Closing the loop
+
+There are two different ways for forcing to respond to the state, and the
+difference is worth a paragraph in any report that uses one:
+
+```julia
+# Per cell, every step, inside the kernel — a distributed thermostat.
+ProportionalSource(target, gain)
+
+# One scalar for the whole domain, updated as often as the callback runs —
+# a central controller with a sampling rate.
+power = ControlSignal(0.0f0)
+model = Heat2D(nx = 96, source = PatternSource(layout, power))
+
+run!(sim; callback_every = 10, callback = function (m, progress)
+    power[] = clamp(0.5f0 * (20 - mean(state(m))), 0, 5)
+    return nothing
+end)
+```
+
+`ControlSignal` is also the supported way to change a forcing mid-run: `Heat2D`
+is immutable, so without it you would have to rebuild the model.
+
+Three consequences worth stating in a report:
 
 - A driven model has **no conservation invariant** — `conserves_state` returns
   `false` as soon as a source is present, whatever the boundary condition.
-- An additive source does not change the stability limit, so `cfl_number` is
-  unaffected. It can still make the solution grow without bound; that is
-  physics, not instability, and the two should not be confused.
+- An additive source (`UniformSource`, `PatternSource`, a `ControlSignal`) does
+  not change the stability limit. It can still make the solution grow without
+  bound; that is physics, not instability, and the two should not be confused.
+- A **state-dependent** source does change the limit, and the model checks for
+  it — see below.
 
 `examples/driven_heat.jl` runs Case A and separates three timescales in one
 table — the daily cycle penetrating a short distance from the edge, the bulk
@@ -152,16 +188,42 @@ both.
 
 ### Stability is checked, not discovered
 
-The explicit scheme is stable only for `alpha * dt * (1/dx^2 + 1/dy^2) <= 1/2`.
-`Heat2D` rejects configurations that violate it instead of producing `NaN`
+`Heat2D` rejects configurations that would diverge, instead of producing `NaN`
 several thousand steps later:
 
 ```julia
 julia> Heat2D(nx = 64, dt = 2.0f0)
-ERROR: ArgumentError: Unstable configuration: CFL number is 0.6, which exceeds the
-explicit-scheme limit of 0.5. The run would diverge to NaN.
+ERROR: ArgumentError: Unstable configuration: stability number is 0.6, which
+exceeds the explicit-scheme limit of 0.5. The run would diverge to NaN.
 ...
 ```
+
+The quantity checked is `stability_number`, not `cfl_number`:
+
+```
+stability_number = alpha*dt*(1/dx^2 + 1/dy^2) + dt*g/4
+                   \_______ diffusion _______/   \_ feedback _/
+```
+
+`g` is the source's `feedback_coefficient` — the largest `|dq/du|` it
+contributes, which is zero for every source that does not read the state. With
+no state-dependent forcing this is exactly the CFL number, and `cfl_number`
+keeps its conventional diffusion-only meaning.
+
+The second term is not cosmetic. A `ProportionalSource` enters the von Neumann
+analysis, so a strong enough controller destabilises the scheme **at a time step
+the diffusion alone tolerates comfortably**:
+
+| gain | `cfl_number` | `stability_number` | outcome |
+|-----:|-------------:|-------------------:|:--------|
+| 5 | 0.030 | 0.155 | stable |
+| 18 | 0.030 | 0.480 | stable |
+| 19 | 0.030 | 0.505 | **rejected** |
+| 40 | 0.030 | 1.030 | **rejected** — diverges to NaN if forced through |
+
+Every row has the same, perfectly safe-looking CFL number. Checking only that
+would accept the last one. The error message names the source's contribution, so
+that lowering the gain is visible as a fix alongside reducing `dt`.
 
 Pass `check_stability = false` to explore the instability deliberately; see
 `examples/stability_cfl.jl`.

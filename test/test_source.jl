@@ -222,3 +222,214 @@ end
     step!(CPUBackend(), model, 7.0)
     @test Array(state(model))[1, 1] == 7.0f0
 end
+
+# ---------------------------------------------------------------------------
+# State-dependent forcing, and what it does to stability
+# ---------------------------------------------------------------------------
+
+@testset "ProportionalSource relaxes towards its target" begin
+    model = Heat2D(nx = 16, ny = 16, initial = 0.0f0;
+                   source = ProportionalSource(20.0f0, 1.0f0))
+    run!(model; steps = 500)
+    u = Array(state(model))
+    @test all(≈(20.0f0; atol = 1e-3), u)          # every cell reaches the target
+
+    # Approach is exponential with rate `gain`: after time t the remaining gap is
+    # exp(-gain*t) of the original. Uniform field, so diffusion does nothing.
+    gap(steps, gain) = begin
+        m = Heat2D(nx = 8, ny = 8, initial = 0.0f0, dt = 0.01f0;
+                   source = ProportionalSource(10.0f0, gain))
+        run!(m; steps = steps)
+        10.0 - Array(state(m))[4, 4]
+    end
+    @test gap(100, 1.0f0) ≈ 10 * (1 - 0.01)^100 rtol = 1e-3   # discrete, not exp()
+    @test gap(100, 2.0f0) ≈ 10 * (1 - 0.02)^100 rtol = 1e-3
+
+    @test_throws ArgumentError ProportionalSource(1.0f0, -0.5f0)   # positive feedback
+end
+
+@testset "a state-dependent source tightens the stability limit" begin
+    # This is the hole that `cfl_number` alone could not see: the diffusion term
+    # is comfortably stable, and the model still diverges because of the gain.
+    alpha, dt = 0.15f0, 0.1f0
+    diffusion_only = Heat2DParams(alpha = alpha, dt = dt, dx = 1.0f0, dy = 1.0f0)
+    @test cfl_number(diffusion_only) ≈ 0.03f0
+    @test is_stable(diffusion_only)
+
+    # |G| <= 1 requires dt*g + 4*(cx+cy) <= 2, i.e. cfl + dt*g/4 <= 1/2.
+    limit = (0.5 - cfl_number(diffusion_only)) * 4 / dt          # 18.8
+    @test limit ≈ 18.8 rtol = 1e-3
+
+    for gain in Float32[1, 10, 18]
+        model = Heat2D(nx = 8, alpha = alpha, dt = dt;
+                       source = ProportionalSource(1.0f0, gain))
+        @test is_stable(model)
+        @test stability_number(model) ≈ cfl_number(diffusion_only) + dt * gain / 4
+        # cfl_number keeps its conventional meaning: diffusion only.
+        @test cfl_number(model) ≈ cfl_number(diffusion_only)
+    end
+
+    # Above the limit the constructor refuses, where before it accepted happily
+    # and produced NaN.
+    for gain in Float32[19, 25, 40]
+        @test_throws ArgumentError Heat2D(nx = 8, alpha = alpha, dt = dt;
+                                          source = ProportionalSource(1.0f0, gain))
+    end
+
+    # And the refusal is justified: forced through, it really does diverge.
+    diverging = Heat2D(nx = 16, alpha = alpha, dt = dt, check_stability = false;
+                       source = ProportionalSource(20.0f0, 40.0f0))
+    initialize_peak!(diverging.field, 5.0f0)
+    run!(diverging; steps = 400)
+    @test !all(isfinite, state(diverging))
+
+    # max_stable_dt accounts for the gain, and its answer is exactly admissible.
+    source = ProportionalSource(1.0f0, 10.0f0)
+    best = max_stable_dt(Heat2DParams(alpha = alpha, dt = dt, dx = 1.0f0, dy = 1.0f0), source)
+    @test stability_number(Heat2DParams(alpha = alpha, dt = best, dx = 1.0f0, dy = 1.0f0),
+                           source) ≈ 0.5 rtol = 1e-5
+    @test is_stable(Heat2D(nx = 8, alpha = alpha, dt = best; source = source))
+
+    # The error message has to say the source is implicated, or it sends the
+    # student to change dt when lowering the gain is the better fix.
+    message = try
+        Heat2D(nx = 8, alpha = alpha, dt = dt; source = ProportionalSource(1.0f0, 40.0f0))
+        ""
+    catch err
+        sprint(showerror, err)
+    end
+    @test occursin("feedback coefficient", message)
+    @test occursin("gain", message)
+end
+
+@testset "additive sources still do not affect stability" begin
+    params = Heat2DParams(alpha = 0.15f0, dt = 0.1f0, dx = 1.0f0, dy = 1.0f0)
+    for source in (NoSource(), UniformSource(1000.0f0),
+                   PatternSource(ones(Float32, 8, 8), 1000.0f0))
+        @test feedback_coefficient(source) == 0
+        @test stability_number(params, source) ≈ cfl_number(params)
+    end
+end
+
+@testset "sources combine additively" begin
+    pattern = zeros(Float32, 10, 10)
+    pattern[5, 5] = 1.0f0
+
+    combined = UniformSource(0.2f0) + PatternSource(pattern, 1.0f0)
+    @test combined isa CombinedSource
+    @test length(combined.sources) == 2
+    @test feedback_coefficient(combined) == 0
+
+    # The combination injects the sum of what each injects alone.
+    total(source) = run!(Heat2D(nx = 10, ny = 10; source = source); steps = 100).total_state
+    @test total(combined) ≈ total(UniformSource(0.2f0)) + total(PatternSource(pattern, 1.0f0)) rtol = 1e-4
+
+    # NoSource is the identity of the sum, and stays free.
+    @test NoSource() + UniformSource(1.0f0) === UniformSource(1.0f0)
+    @test UniformSource(1.0f0) + NoSource() === UniformSource(1.0f0)
+    @test NoSource() + NoSource() === NoSource()
+
+    # Flattening rather than nesting.
+    triple = UniformSource(1.0f0) + PatternSource(pattern, 1.0f0) + UniformSource(2.0f0)
+    @test length(triple.sources) == 3
+
+    # Feedback coefficients add, so a combination can be rejected when neither
+    # part would be on its own.
+    pair = ProportionalSource(1.0f0, 10.0f0) + ProportionalSource(2.0f0, 12.0f0)
+    @test feedback_coefficient(pair) == 22.0f0
+    @test_throws ArgumentError Heat2D(nx = 8, dt = 0.1f0; source = pair)
+    @test is_stable(Heat2D(nx = 8, dt = 0.1f0; source = ProportionalSource(1.0f0, 10.0f0)))
+end
+
+@testset "order of a combination does not matter" begin
+    # Applying sources in sequence rather than summing their rates would make
+    # this fail as soon as one of them reads the state.
+    pattern = ones(Float32, 12, 12)
+    a = PatternSource(pattern, 0.4f0)
+    b = ProportionalSource(5.0f0, 2.0f0)
+
+    forward = Heat2D(nx = 12, ny = 12; source = a + b)
+    backward = Heat2D(nx = 12, ny = 12; source = b + a)
+    initialize_peak!(forward.field, 30.0f0)
+    initialize_peak!(backward.field, 30.0f0)
+    run!(forward; steps = 200)
+    run!(backward; steps = 200)
+    @test Array(state(forward)) == Array(state(backward))
+end
+
+@testset "ControlSignal closes the loop from a callback" begin
+    pattern = zeros(Float32, 16, 16)
+    pattern[8, 8] = 1.0f0
+
+    power = ControlSignal(0.0f0)
+    @test power[] == 0.0f0
+    power[] = 2.5
+    @test power[] === 2.5f0                      # converted to the stored type
+    @test power(123.0) === 2.5f0                 # callable, ignores time
+
+    model = Heat2D(nx = 16, ny = 16; source = PatternSource(pattern, power))
+    @test is_driven(model)
+    @test feedback_coefficient(model.source) == 0    # a signal is not feedback
+
+    # Off, then on: the total only grows during the second half.
+    power[] = 0.0f0
+    run!(model; steps = 50)
+    @test sum_state(model) ≈ 0.0f0 atol = 1e-6
+    power[] = 5.0f0
+    run!(model; steps = 50)
+    @test sum_state(model) ≈ 50 * 0.1 * 5.0 rtol = 1e-4
+
+    # Driven from inside a callback, which is the intended use.
+    controlled = Heat2D(nx = 16, ny = 16, initial = 0.0f0;
+                        source = PatternSource(ones(Float32, 16, 16), power))
+    power[] = 0.0f0
+    samples = Float64[]
+    run!(Simulation(controlled; stop = Steps(300));
+         callback_every = 10,
+         callback = function (m, progress)
+             mean_temp = sum(Array(state(m))) / length(m.field)
+             power[] = clamp(0.5f0 * (10 - mean_temp), 0.0f0, 2.0f0)
+             push!(samples, mean_temp)
+             return nothing
+         end)
+    @test length(samples) == 30
+    @test issorted(samples)                       # monotone approach to the setpoint
+    @test last(samples) > 5.0                     # and it got most of the way there
+    @test last(samples) < 10.5                    # without overshooting badly
+end
+
+@testset "state-dependent forcing agrees across backends" begin
+    pattern = zeros(Float32, 24, 24)
+    pattern[6, 6] = 1.0f0
+    pattern[18, 12] = 2.5f0
+
+    configurations = [
+        "proportional"        => (; source = ProportionalSource(12.0f0, 2.0f0)),
+        "proportional driven" => (; source = ProportionalSource(t -> 12.0f0 + 4sin(t), 2.0f0)),
+        "pattern+relaxation"  => (; source = PatternSource(copy(pattern), 0.6f0) +
+                                             ProportionalSource(0.0f0, 1.5f0)),
+    ]
+
+    for (name, kwargs) in configurations
+        @testset "$name" begin
+            reference = Heat2D(nx = 24, ny = 24; kwargs...)
+            initialize_peak!(reference.field, 50.0f0)
+            run!(reference; backend = CPUBackend(), steps = 200)
+            expected = Array(state(reference))
+
+            for backend in (CPUBackend(threaded = true), KernelBackend())
+                model = Heat2D(nx = 24, ny = 24; kwargs...)
+                initialize_peak!(model.field, 50.0f0)
+                run!(model; backend = backend, steps = 200)
+                @test Array(state(model)) == expected
+            end
+
+            for (gpu_name, backend) in GPU_BACKENDS
+                model = Heat2D(nx = 24, ny = 24; kwargs...)
+                initialize_peak!(model.field, 50.0f0)
+                run!(model; backend = backend, steps = 200)
+                @test Array(state(model)) ≈ expected rtol = 1e-4 atol = 1e-5
+            end
+        end
+    end
+end

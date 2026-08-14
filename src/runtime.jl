@@ -53,15 +53,9 @@ function upload(backend::KernelBackend, model::Heat2D{T}) where {T}
 
     # A PatternSource carries a grid-sized array of its own, which has to travel
     # with the field or the kernel would be indexing host memory from the device.
-    source = model.source
-    bytes = sizeof(T) * length(model.field)
-    pattern = source_array(source)
-    if pattern !== nothing
-        device_pattern = KernelAbstractions.allocate(device, eltype(pattern), size(pattern))
-        copyto!(device_pattern, pattern)
-        source = with_array(source, device_pattern)
-        bytes += sizeof(eltype(pattern)) * length(pattern)
-    end
+    # CombinedSource may hold several, so the move recurses.
+    source, source_bytes = move_source_to_device(model.source, device)
+    bytes = sizeof(T) * length(model.field) + source_bytes
 
     KernelAbstractions.synchronize(device)
     elapsed = (time_ns() - start) / 1e9

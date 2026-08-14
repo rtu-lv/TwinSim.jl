@@ -71,22 +71,106 @@ end
 
 PatternSource(pattern::AbstractMatrix) = PatternSource(pattern, true)
 
+"""
+    ProportionalSource(target, gain)
+
+Forcing proportional to how far the cell is from a target:
+
+```
+q = gain * (target - u[i, j])
+```
+
+Two readings of the same term, and both matter in this course:
+
+- **Physics**: Newton's law of cooling. The cell exchanges heat with a reservoir
+  at `target`, at a rate set by the coupling `gain`.
+- **Control**: a per-cell proportional controller (a thermostat) driving the
+  state towards a setpoint.
+
+`target` may be a number or a callable of time, so a setpoint schedule works.
+**`gain` must be a plain number.** It is a tuning constant, not a signal, and
+keeping it constant is what makes the stability limit decidable at construction —
+see [`stability_number`](@ref).
+
+Unlike the other sources this one **depends on the state**, which changes the
+stability limit of the explicit scheme. That is why `Heat2D` checks
+`stability_number` rather than `cfl_number`.
+"""
+struct ProportionalSource{T,G<:Number} <: SourceTerm
+    target::T
+    gain::G
+
+    function ProportionalSource(target::T, gain::G) where {T,G<:Number}
+        gain >= 0 || throw(ArgumentError(
+            "gain must be non-negative, got $gain. A negative gain is positive " *
+            "feedback: it drives cells away from the target and diverges for any dt."))
+        return new{T,G}(target, gain)
+    end
+end
+
+"""
+    CombinedSource(sources...)
+    source_a + source_b
+
+Several forcings acting at once — heaters *and* ambient loss, which is what a
+real installation has.
+
+The rates are summed and applied once, rather than each source updating the
+value in turn. For purely additive sources the two are the same; as soon as one
+of them depends on the state (as [`ProportionalSource`](@ref) does) they are not,
+and applying them in sequence would make the result depend on the order.
+"""
+struct CombinedSource{S<:Tuple} <: SourceTerm
+    sources::S
+end
+
+CombinedSource(sources::SourceTerm...) = CombinedSource(sources)
+
+Base.:+(a::SourceTerm, b::SourceTerm) = CombinedSource(a, b)
+Base.:+(a::CombinedSource, b::SourceTerm) = CombinedSource((a.sources..., b))
+Base.:+(a::SourceTerm, b::CombinedSource) = CombinedSource((a, b.sources...))
+Base.:+(a::CombinedSource, b::CombinedSource) = CombinedSource((a.sources..., b.sources...))
+Base.:+(a::NoSource, b::SourceTerm) = b
+Base.:+(a::SourceTerm, b::NoSource) = a
+Base.:+(a::NoSource, b::NoSource) = a
+
 # ---------------------------------------------------------------------------
 # Applying a source inside the stencil
 # ---------------------------------------------------------------------------
 #
-# Written as "add to an already-computed value" rather than "return q", so that
-# NoSource is a literal identity function. A `return zero(T)` version would still
-# emit an addition per cell in the hot loop.
+# `source_rate` returns q; `apply_source` is what the stencil calls.
+#
+# The split exists so that sources can be *summed* before being applied, which a
+# state-dependent term requires. `apply_source` keeps a dedicated NoSource method
+# that is the literal identity: going through `value + dt * zero(T)` would emit a
+# real addition per cell, because floating-point `x + 0.0` is not `x` when
+# `x === -0.0` and the compiler is not free to fold it.
+
+@inline source_rate(::NoSource, value, i, j) = zero(value)
+@inline source_rate(source::UniformSource, value, i, j) = source.rate
+
+@inline function source_rate(source::PatternSource, value, i, j)
+    @inbounds return source.rate * source.pattern[i, j]
+end
+
+@inline source_rate(source::ProportionalSource, value, i, j) =
+    source.gain * (source.target - value)
+
+@inline source_rate(source::CombinedSource, value, i, j) =
+    sum_rates(source.sources, value, i, j)
+
+# Peeled recursively rather than with `for inner in sources`. Iterating a tuple
+# compiles to a dynamic `getindex`, which a GPU kernel cannot do — it shows up as
+# "unsupported call to an unknown function (call to ijl_get_nth_field_checked)".
+# This form is fully unrolled at compile time and each source keeps its own
+# specialisation.
+@inline sum_rates(::Tuple{}, value, i, j) = zero(value)
+@inline sum_rates(sources::Tuple, value, i, j) =
+    source_rate(first(sources), value, i, j) + sum_rates(Base.tail(sources), value, i, j)
 
 @inline apply_source(::NoSource, value, i, j, dt) = value
-
-@inline apply_source(source::UniformSource, value, i, j, dt) =
-    value + dt * source.rate
-
-@inline function apply_source(source::PatternSource, value, i, j, dt)
-    @inbounds return value + dt * source.rate * source.pattern[i, j]
-end
+@inline apply_source(source::SourceTerm, value, i, j, dt) =
+    value + dt * source_rate(source, value, i, j)
 
 # ---------------------------------------------------------------------------
 # Resolving a time-varying source to something a kernel can take
@@ -118,6 +202,15 @@ a million threads even if it could.
 @inline resolve(source::PatternSource, t, ::Type{T}) where {T} =
     PatternSource(source.pattern, convert(T, source.rate(t)))
 
+@inline resolve(source::ProportionalSource{<:Number}, t, ::Type{T}) where {T} =
+    ProportionalSource(convert(T, source.target), convert(T, source.gain))
+
+@inline resolve(source::ProportionalSource, t, ::Type{T}) where {T} =
+    ProportionalSource(convert(T, source.target(t)), convert(T, source.gain))
+
+@inline resolve(source::CombinedSource, t, ::Type{T}) where {T} =
+    CombinedSource(map(inner -> resolve(inner, t, T), source.sources))
+
 """
     is_driven(source) -> Bool
 
@@ -128,12 +221,107 @@ is_driven(::UniformSource) = true
 is_driven(::UniformSource{<:Number}) = false
 is_driven(::PatternSource) = true
 is_driven(::PatternSource{<:Number}) = false
+is_driven(::ProportionalSource) = true
+is_driven(::ProportionalSource{<:Number}) = false
+is_driven(source::CombinedSource) = any(is_driven, source.sources)
 
-source_array(::SourceTerm) = nothing
-source_array(source::PatternSource) = source.pattern
+"""
+    feedback_coefficient(source) -> Real
 
-with_array(source::SourceTerm, ::Any) = source
-with_array(source::PatternSource, pattern) = PatternSource(pattern, source.rate)
+The largest `|d q / d u|` the source contributes: how strongly the forcing
+responds to the state it is forcing.
+
+Zero for every source that does not read the state. [`ProportionalSource`](@ref)
+contributes its gain, and that term tightens the stability limit of the explicit
+scheme — see [`stability_number`](@ref).
+"""
+feedback_coefficient(::SourceTerm) = 0
+feedback_coefficient(source::ProportionalSource) = source.gain
+feedback_coefficient(source::CombinedSource) =
+    sum(feedback_coefficient, source.sources; init = 0)
+
+"""
+    move_source_to_device(source, device) -> (source, bytes)
+
+Copy any grid-sized arrays the source carries into `device` memory, returning the
+relocated source and the number of bytes transferred. Recurses through
+[`CombinedSource`](@ref), which may hold more than one pattern.
+"""
+move_source_to_device(source::SourceTerm, device) = (source, 0)
+
+function move_source_to_device(source::PatternSource, device)
+    pattern = source.pattern
+    device_pattern = KernelAbstractions.allocate(device, eltype(pattern), size(pattern))
+    copyto!(device_pattern, pattern)
+    return (PatternSource(device_pattern, source.rate),
+            sizeof(eltype(pattern)) * length(pattern))
+end
+
+function move_source_to_device(source::CombinedSource, device)
+    moved = map(inner -> move_source_to_device(inner, device), source.sources)
+    return (CombinedSource(map(first, moved)), sum(last, moved; init = 0))
+end
+
+"""
+    check_source_shape(source, dims)
+
+Verify that every pattern the source carries matches the field.
+"""
+check_source_shape(::SourceTerm, dims) = nothing
+
+function check_source_shape(source::PatternSource, dims)
+    size(source.pattern) == dims || throw(DimensionMismatch(
+        "source pattern is $(size(source.pattern)) but the field is $dims"))
+    return nothing
+end
+
+function check_source_shape(source::CombinedSource, dims)
+    foreach(inner -> check_source_shape(inner, dims), source.sources)
+    return nothing
+end
+
+"""
+    ControlSignal(value)
+
+A mutable scalar that can be used anywhere a drive is accepted, and written to
+from a `run!` callback:
+
+```julia
+power = ControlSignal(0.0f0)
+model = Heat2D(nx = 96, source = PatternSource(layout, power))
+
+run!(sim; callback_every = 10, callback = function (m, progress)
+    mean_temp = sum(Array(state(m))) / length(m.field)
+    power[] = clamp(0.5f0 * (20 - mean_temp), 0, 5)      # close the loop
+    return nothing
+end)
+```
+
+This is how a controller that reacts to the *state* is written, as opposed to
+[`ProportionalSource`](@ref), which reacts per cell inside the kernel. The
+difference is real and worth stating in a report:
+
+- `ProportionalSource` acts on every cell independently, every step, using that
+  cell's own value. It is a distributed thermostat, and it changes the stability
+  limit.
+- `ControlSignal` acts on one scalar shared by the whole domain, updated as often
+  as the callback runs, using whatever reduction of the state you choose. It is a
+  central controller with a sampling rate, and it does not affect stability
+  because the kernel still sees a constant.
+
+Because a `Heat2D` is immutable, this is also the supported way to change a
+forcing mid-run without rebuilding the model.
+"""
+mutable struct ControlSignal{T}
+    value::T
+end
+
+(signal::ControlSignal)(t) = signal.value
+
+Base.getindex(signal::ControlSignal) = signal.value
+Base.setindex!(signal::ControlSignal, value) =
+    (signal.value = convert(typeof(signal.value), value))
+Base.show(io::IO, signal::ControlSignal) = print(io, "ControlSignal(", signal.value, ")")
 
 # A `PatternSource` holding a device array still cannot be passed to a kernel as
 # it stands: `MtlMatrix`/`CuArray` are *host-side* wrappers around a buffer
@@ -144,6 +332,11 @@ with_array(source::PatternSource, pattern) = PatternSource(pattern, source.rate)
 # Without it the kernel fails to compile with "passing non-bitstype argument",
 # which is the standard symptom of a custom struct carrying an array onto a GPU.
 Adapt.@adapt_structure PatternSource
+
+# And again for the wrapper: a CombinedSource holding a PatternSource is no more
+# isbits than the PatternSource was. Adapt already recurses through tuples, so
+# this one line covers a combination of any depth.
+Adapt.@adapt_structure CombinedSource
 
 # Compact display. Without these, showing a model with a PatternSource prints the
 # whole grid-sized pattern array.
@@ -160,6 +353,20 @@ function Base.show(io::IO, source::PatternSource)
     active = count(!iszero, source.pattern)
     print(io, "PatternSource(", nx, "x", ny, " pattern, ", active, " active cells, ",
           describe_rate(source.rate), ")")
+    return nothing
+end
+
+Base.show(io::IO, source::ProportionalSource) =
+    print(io, "ProportionalSource(target ", describe_rate(source.target),
+          ", gain ", source.gain, ")")
+
+function Base.show(io::IO, source::CombinedSource)
+    print(io, "CombinedSource(")
+    for (k, inner) in enumerate(source.sources)
+        k == 1 || print(io, " + ")
+        show(io, inner)
+    end
+    print(io, ")")
     return nothing
 end
 
