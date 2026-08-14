@@ -55,7 +55,7 @@ RunMetrics
 |:--------|:-----|:--------|
 | Model | `Heat2D`, `Heat2DParams` | what is simulated |
 | Boundary | `Neumann`, `Periodic`, `Dirichlet` | how the domain edge behaves |
-| Forcing | `NoSource`, `UniformSource`, `PatternSource`, `ProportionalSource`, `TimeSeries`, `ControlSignal` | what drives it from outside |
+| Forcing | `NoSource`, `UniformSource`, `PatternSource`, `ProportionalSource`, `SampledSeries`, `ControlSignal` | what drives it from outside |
 | Backend | `CPUBackend`, `KernelBackend`, `CUDADevice`, `MetalDevice`, `ROCmDevice` | where it runs |
 | Runtime | `Simulation`, `Steps`, `UntilTime`, `Converged`, `WallClock`, `AnyOf` | how long it runs |
 | Metrics | `RunMetrics`, `mlups`, `bandwidth_gbs`, `arithmetic_intensity` | what it cost |
@@ -136,7 +136,7 @@ result depend on the order you wrote them in.
 Anywhere a value is accepted, a **callable of simulated time** is too:
 
 ```julia
-outdoor = TimeSeries(hours, temperatures)          # interpolates sampled data
+outdoor = SampledSeries(hours, temperatures)          # interpolates sampled data
 demand(t) = max(0.0f0, 0.06f0 * (16 - outdoor(t))) # a weather-compensated control law
 
 model = Heat2D(nx = 96, ny = 96, dt = 0.02f0,
@@ -295,6 +295,49 @@ each task is large enough that the parallelism pays. Threading is *refused* on
 GPU backends rather than silently ignored: several host threads submitting to one
 device do not get more of it.
 
+### Getting results out
+
+Two tiers, deliberately separated.
+
+**CSV export needs no dependencies** and therefore works everywhere the
+simulation does — a cluster node, a container, a CI job:
+
+```julia
+write_csv("out/metrics.csv", recorder)
+write_csv("out/observations.csv", observed)   # values, clean signal, ground truth
+write_csv("out/twin.csv", log)
+write_csv("out/sweep.csv", results)
+```
+
+**Figures need a Makie backend**, loaded through a package extension — the same
+arrangement as the GPU backends, and for the same reason: a plotting stack is
+heavy, and a simulation package that cannot run without a display cannot run on
+the machine you most want it on.
+
+```julia
+using Pkg; Pkg.add("CairoMakie")
+using CairoMakie, VisuTwinSim          # CairoMakie renders headless
+
+save("field.png", plot_field(model))
+save("metrics.png", plot_series(recorder))
+save("detection.png", plot_detection(times, residuals, truth; thresholds = [1.0, 2.0]))
+save("sweep.png", plot_sweep(results))
+animate_field(model, "diffusion.mp4"; frames = 60, steps_per_frame = 20)
+```
+
+`plotting_available()` reports whether the backend is loaded; without it, each
+plotting function raises an error naming both the package to install and the
+`write_csv` alternative. `frame_callback` writes one image per interval during a
+run, for streaming visualisation of something too long to hold in memory.
+
+Two things worth knowing:
+
+- **Fix `colorrange` on animations.** Left to rescale per frame, a decaying peak
+  looks perfectly constant — the animation shows the colour map adapting rather
+  than the physics.
+- **Ship the CSV as well as the picture.** A figure nobody can regenerate from
+  data is an assertion; the data plus the script that drew it is evidence.
+
 ### The simulated clock
 
 A model carries its own clock, so successive runs continue rather than restart:
@@ -451,6 +494,7 @@ docs/labs/           lab notes
 | `stability_cfl.jl` | what exceeding the CFL limit actually does |
 | `digital_twin.jl` | assimilation, real-time pacing, checkpoint and restart |
 | `monitoring_twin.jl` | fault detection, threshold trade-off, why assimilation hides faults |
+| `visualization.jl` | figures, animation, and dependency-free CSV export |
 | `random_walk_ensemble.jl` | reproducible parallel Monte Carlo |
 
 ## Tests

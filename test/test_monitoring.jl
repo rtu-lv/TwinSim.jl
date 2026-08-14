@@ -251,10 +251,17 @@ end
     log = twin_run!(TwinLoop(steps_per_window = 10), model, ones(4))
     @test log.times ≈ [0.0, 1.0, 2.0, 3.0]
 
-    # Explicit times are used verbatim.
-    log = twin_run!(TwinLoop(steps_per_window = 10), Heat2D(nx = 16, ny = 16),
-                    ones(3); times = [5.0, 10.0, 20.0])
+    # Explicit times are used verbatim. These are 5.0 apart while each window
+    # advances 10 * 0.1 = 1.0, which is exactly the desynchronisation the loop
+    # warns about — so assert the warning rather than letting it clutter the log.
+    log = @test_logs (:warn,) twin_run!(TwinLoop(steps_per_window = 10),
+                                        Heat2D(nx = 16, ny = 16),
+                                        ones(3); times = [5.0, 10.0, 20.0])
     @test log.times == [5.0, 10.0, 20.0]
+
+    # Matching cadence is silent.
+    @test_logs twin_run!(TwinLoop(steps_per_window = 10), Heat2D(nx = 16, ny = 16),
+                         ones(3); times = [0.0, 1.0, 2.0])
 
     # An ObservationSeries brings its own.
     observed = synthetic_series(samples = 6, step = 2.0, seed = 1)
@@ -284,7 +291,7 @@ end
     # steps_per_window * dt must equal the observation spacing, or the boundary
     # drive and the observations are sampled at different instants.
     twin = Heat2D(nx = 24, ny = 24, initial = 0.0f0, dt = 0.1f0;
-                  boundary = Dirichlet(TimeSeries(observed.times, observed.clean)))
+                  boundary = Dirichlet(SampledSeries(observed.times, observed.clean)))
     loop = TwinLoop(
         validate = (m, o, t) -> (; innovation = o - Float64(m.field[1, 12])),
         decide = (m, c, t) -> abs(c.innovation) > 3.0 ? :alarm : :ok,

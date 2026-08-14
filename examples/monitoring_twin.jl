@@ -24,7 +24,7 @@ const PROBE = (20, 20)        # the one cell an instrument actually reads
 # Shared environment and geometry.
 # ---------------------------------------------------------------------------
 sample_times = collect(0.0:1.0:float(HOURS - 1))
-outdoor = TimeSeries(sample_times, [-4.0 + 6.0 * sin(2pi * (t - 9) / 24) for t in sample_times])
+outdoor = SampledSeries(sample_times, [-4.0 + 6.0 * sin(2pi * (t - 9) / 24) for t in sample_times])
 
 function heater_layout(n)
     pattern = zeros(Float32, n, n)

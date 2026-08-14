@@ -21,7 +21,7 @@ const GRID = 96
 # ---------------------------------------------------------------------------
 sample_times = collect(0.0:1.0:HOURS)
 outdoor_samples = [-4.0 + 6.0 * sin(2pi * (t - 9) / 24) for t in sample_times]
-outdoor = TimeSeries(sample_times, outdoor_samples)
+outdoor = SampledSeries(sample_times, outdoor_samples)
 
 @printf("Outdoor series: %d hourly samples, %.1f to %.1f degrees\n",
         length(outdoor), minimum(outdoor_samples), maximum(outdoor_samples))

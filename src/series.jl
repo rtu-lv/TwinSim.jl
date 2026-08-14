@@ -140,7 +140,7 @@ struct ObservationSeries{T<:Real}
     anomalous::Vector{Bool}
     anomalies::Vector{Anomaly}
     seed::Int
-    interpolant::TimeSeries{Float64,T}
+    interpolant::SampledSeries{Float64,T}
 end
 
 (series::ObservationSeries)(t) = series.interpolant(t)
@@ -208,7 +208,7 @@ function synthetic_series(; samples::Integer = 120,
         flagged[anomaly_range(a, samples)] .= true
     end
 
-    interpolant = TimeSeries(times, values)
+    interpolant = SampledSeries(times, values)
     return ObservationSeries(times, values, clean, collect(flagged),
                              collect(Anomaly, anomalies), Int(seed), interpolant)
 end

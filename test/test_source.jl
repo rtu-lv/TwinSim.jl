@@ -137,8 +137,8 @@ end
     @test metrics.total_state ≈ 10 * 10 * 1.0 * 0.1 * 50 rtol = 1e-4
 end
 
-@testset "TimeSeries" begin
-    series = TimeSeries([0.0, 5.0, 10.0], [0.0, 100.0, 0.0])
+@testset "SampledSeries" begin
+    series = SampledSeries([0.0, 5.0, 10.0], [0.0, 100.0, 0.0])
     @test series(0.0) ≈ 0.0
     @test series(2.5) ≈ 50.0
     @test series(5.0) ≈ 100.0
@@ -151,22 +151,22 @@ end
     @test series(-1.0) ≈ 0.0
     @test series(99.0) ≈ 0.0
 
-    strict = TimeSeries([0.0, 1.0], [5.0, 6.0]; extrapolate = :error)
+    strict = SampledSeries([0.0, 1.0], [5.0, 6.0]; extrapolate = :error)
     @test strict(0.5) ≈ 5.5
     @test strict(0.0) ≈ 5.0          # endpoints are inside the range
     @test strict(1.0) ≈ 6.0
     @test_throws ArgumentError strict(-0.001)
     @test_throws ArgumentError strict(1.001)
 
-    @test_throws ArgumentError TimeSeries([0.0], [1.0])                    # too short
-    @test_throws ArgumentError TimeSeries([0.0, 1.0], [1.0])               # length mismatch
-    @test_throws ArgumentError TimeSeries([1.0, 0.0], [1.0, 2.0])          # unsorted
-    @test_throws ArgumentError TimeSeries([0.0, 0.0], [1.0, 2.0])          # duplicated
-    @test_throws ArgumentError TimeSeries([0.0, 1.0], [1.0, 2.0]; extrapolate = :hold)
+    @test_throws ArgumentError SampledSeries([0.0], [1.0])                    # too short
+    @test_throws ArgumentError SampledSeries([0.0, 1.0], [1.0])               # length mismatch
+    @test_throws ArgumentError SampledSeries([1.0, 0.0], [1.0, 2.0])          # unsorted
+    @test_throws ArgumentError SampledSeries([0.0, 0.0], [1.0, 2.0])          # duplicated
+    @test_throws ArgumentError SampledSeries([0.0, 1.0], [1.0, 2.0]; extrapolate = :hold)
 
     # Driving a boundary from sampled data.
     model = Heat2D(nx = 10, ny = 10; dt = 0.1f0,
-                   boundary = Dirichlet(TimeSeries([0.0, 10.0], [0.0, 100.0])))
+                   boundary = Dirichlet(SampledSeries([0.0, 10.0], [0.0, 100.0])))
     run!(model; steps = 50)                      # last update at t = 4.9 -> 49.0
     @test Array(state(model))[1, 1] ≈ 49.0f0 rtol = 1e-3
 end

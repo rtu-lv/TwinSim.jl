@@ -45,11 +45,11 @@ driven by its environment:
 
 ```julia
 Dirichlet(t -> 5.0f0 + 10.0f0 * sin(2pi * t / 24))   # a daily cycle
-Dirichlet(TimeSeries(hours, outdoor_temperatures))   # measured or forecast data
+Dirichlet(SampledSeries(hours, outdoor_temperatures))   # measured or forecast data
 ```
 
 The callable is evaluated once per step on the host, and the resulting scalar is
-what the kernel receives. See [`TimeSeries`](@ref).
+what the kernel receives. See [`SampledSeries`](@ref).
 """
 struct Dirichlet{T} <: BoundaryCondition
     value::T
@@ -63,7 +63,7 @@ Dirichlet() = Dirichlet(0.0f0)
 Whether the boundary value depends on simulated time.
 """
 # Dispatch on "not a number" rather than "is a Function": a callable struct such
-# as TimeSeries does not subtype Function, and neither do most user-defined
+# as SampledSeries does not subtype Function, and neither do most user-defined
 # callables. A Dirichlet value is either a plain number or something to call.
 is_driven(::BoundaryCondition) = false
 is_driven(::Dirichlet) = true

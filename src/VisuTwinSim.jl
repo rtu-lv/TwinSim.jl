@@ -58,7 +58,7 @@ export
     ProportionalSource,
     CombinedSource,
     ControlSignal,
-    TimeSeries,
+    SampledSeries,
     is_driven,
     feedback_coefficient,
     # model
@@ -117,6 +117,15 @@ export
     # scenarios
     parameter_sweep,
     sweep_table,
+    # output and figures
+    write_csv,
+    plotting_available,
+    plot_field,
+    plot_series,
+    plot_detection,
+    plot_sweep,
+    animate_field,
+    frame_callback,
     # ensemble
     random_walk_ensemble
 
@@ -135,6 +144,7 @@ include("detection.jl")
 include("recorder.jl")
 include("twinloop.jl")
 include("sweep.jl")
+include("visualize.jl")
 include("ensemble.jl")
 
 end # module VisuTwinSim

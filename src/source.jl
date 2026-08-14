@@ -23,7 +23,7 @@ Three forms, covering the cases the course needs:
 `PatternSource` splits *where* the forcing acts from *how strong it is*. That
 split is what makes it drivable: the pattern is fixed geometry that can live on
 the GPU untouched, while the rate is one scalar per step that can come from a
-measurement series. See [`TimeSeries`](@ref).
+measurement series. See [`SampledSeries`](@ref).
 
 An additive source does not affect the stability limit of the explicit scheme,
 so [`cfl_number`](@ref) is unchanged by it. It can still make the solution grow
@@ -44,7 +44,7 @@ struct NoSource <: SourceTerm end
     UniformSource(rate)
 
 Adds `rate` to every cell per unit of simulated time. `rate` may be a number, or
-a callable of time for a source that varies (see [`TimeSeries`](@ref)).
+a callable of time for a source that varies (see [`SampledSeries`](@ref)).
 
 Negative rates are losses, which is the usual way to represent a domain leaking
 heat to an ambient environment.
@@ -187,7 +187,7 @@ Julia closure, and would not want to re-evaluate the same scalar in every one of
 a million threads even if it could.
 """
 # As for boundaries, the split is "number" versus "something to call", so that a
-# callable struct such as TimeSeries works without subtyping Function.
+# callable struct such as SampledSeries works without subtyping Function.
 @inline resolve(source::NoSource, t, ::Type{T}) where {T} = source
 
 @inline resolve(source::UniformSource{<:Number}, t, ::Type{T}) where {T} =
@@ -375,13 +375,13 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    TimeSeries(times, values; extrapolate = :clamp)
+    SampledSeries(times, values; extrapolate = :clamp)
 
 A callable that interpolates sampled data linearly, so a recorded or synthetic
 series can drive a boundary or a source directly:
 
 ```julia
-outdoor = TimeSeries(hours, temperatures)
+outdoor = SampledSeries(hours, temperatures)
 model = Heat2D(nx = 64, boundary = Dirichlet(outdoor), dt = 0.1f0)
 ```
 
@@ -394,17 +394,17 @@ Interpolating is a modelling decision worth stating in a report: hourly weather
 data driving a model with `dt = 0.1` means 36 000 simulated steps between two
 real measurements, and the smoothness in between is an assumption, not data.
 """
-struct TimeSeries{T<:Real,V<:Real}
+struct SampledSeries{T<:Real,V<:Real}
     times::Vector{T}
     values::Vector{V}
     extrapolate::Symbol
 
-    function TimeSeries(times::AbstractVector{T}, values::AbstractVector{V};
+    function SampledSeries(times::AbstractVector{T}, values::AbstractVector{V};
                         extrapolate::Symbol = :clamp) where {T<:Real,V<:Real}
         length(times) == length(values) ||
             throw(ArgumentError("times and values must have equal length, got $(length(times)) and $(length(values))"))
         length(times) >= 2 ||
-            throw(ArgumentError("a TimeSeries needs at least two samples, got $(length(times))"))
+            throw(ArgumentError("a SampledSeries needs at least two samples, got $(length(times))"))
         issorted(times) && allunique(times) ||
             throw(ArgumentError("times must be sorted and strictly increasing"))
         extrapolate in (:clamp, :error) ||
@@ -413,7 +413,7 @@ struct TimeSeries{T<:Real,V<:Real}
     end
 end
 
-function (series::TimeSeries)(t)
+function (series::SampledSeries)(t)
     times, values = series.times, series.values
     if t <= first(times)
         series.extrapolate === :error && t < first(times) &&
@@ -434,11 +434,11 @@ function (series::TimeSeries)(t)
     return float(v0 + theta * (v1 - v0))
 end
 
-Base.length(series::TimeSeries) = length(series.times)
-Base.extrema(series::TimeSeries) = (first(series.times), last(series.times))
+Base.length(series::SampledSeries) = length(series.times)
+Base.extrema(series::SampledSeries) = (first(series.times), last(series.times))
 
-function Base.show(io::IO, series::TimeSeries)
+function Base.show(io::IO, series::SampledSeries)
     t0, t1 = extrema(series)
-    print(io, "TimeSeries(", length(series), " samples, t ∈ [", t0, ", ", t1, "])")
+    print(io, "SampledSeries(", length(series), " samples, t ∈ [", t0, ", ", t1, "])")
     return nothing
 end

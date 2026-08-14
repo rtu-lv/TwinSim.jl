@@ -18,6 +18,18 @@ for (pkg, helper) in (("CUDA", CUDADevice), ("Metal", MetalDevice), ("AMDGPU", R
     end
 end
 
+# A Makie backend, if the test environment has one, so the figure tests can run.
+for pkg in ("CairoMakie", "GLMakie")
+    Base.identify_package(pkg) === nothing && continue
+    try
+        @eval using $(Symbol(pkg))
+        @info "Loaded $pkg for figure tests"
+        break
+    catch err
+        @info "$pkg present but not usable, skipping" exception = err
+    end
+end
+
 if isempty(GPU_BACKENDS)
     @info "No GPU backend available; GPU tests will be skipped. " *
           "Add CUDA, Metal or AMDGPU to test/Project.toml to exercise them."
@@ -35,5 +47,6 @@ end
     include("test_twin.jl")
     include("test_monitoring.jl")
     include("test_sweep.jl")
+    include("test_visualize.jl")
     include("test_ensemble.jl")
 end

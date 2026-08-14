@@ -49,3 +49,29 @@ jobs:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
         continue-on-error: true
+
+  # The plotting extension is optional, so the matrix above never loads it — and
+  # an untested optional path rots quietly. One job, one platform: enough to catch
+  # a method overwrite, a renamed export or a broken figure call.
+  #
+  # GPU extensions cannot be covered this way (no GPU on a hosted runner); they
+  # are exercised manually. This one can, so it is.
+  makie-extension:
+    name: Makie extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - name: Test with CairoMakie loaded
+        shell: julia --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.activate(; temp = true)
+          Pkg.develop(PackageSpec(path = pwd()))
+          Pkg.add(["CairoMakie", "Test", "Statistics"])
+          Pkg.precompile()
+          include(joinpath(pwd(), "test", "runtests.jl"))
