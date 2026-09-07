@@ -3,7 +3,7 @@
 Julia teaching package for simulation and digital twin concepts, with a CPU
 reference backend and portable GPU backends for CUDA, Metal and ROCm.
 
-Built for the study course **High-Performance Computing in Simulation and
+Built for the study course DE1108 **High-Performance Computing in Simulation and
 Digital Twin Systems** at Riga Technical University.
 
 ## Goals
