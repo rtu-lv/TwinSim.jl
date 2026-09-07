@@ -120,8 +120,7 @@ run!(sim; callback = checkpoint_callback("out/twin_%05d.vts"), callback_every = 
 The format is a documented 50-byte header plus raw column-major data (see the
 comment block in `src/twin.jl`) rather than a Julia serialisation. That choice is
 deliberate: it survives Julia version changes, and it can be read from C++ or
-Python in a few lines — which is the simplest available bridge to the C++
-`visutwin-sim` core.
+Python in a few lines.
 
 Note that `load_state` deliberately does *not* store the model parameters. A
 restart usually wants to change them, and silently reusing the old ones hides

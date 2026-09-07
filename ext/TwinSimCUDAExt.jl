@@ -1,14 +1,14 @@
-module VisuTwinSimCUDAExt
+module TwinSimCUDAExt
 
 using CUDA
-using VisuTwinSim
-using VisuTwinSim: heat_update, diffusion_coefficients, resolve, swapbuffers!
+using TwinSim
+using TwinSim: heat_update, diffusion_coefficients, resolve, swapbuffers!
 
 # ---------------------------------------------------------------------------
 # The portable path: no kernel here at all.
 # ---------------------------------------------------------------------------
 #
-# `VisuTwinSim.heat2d_kernel!` is written once with KernelAbstractions and CUDA.jl
+# `TwinSim.heat2d_kernel!` is written once with KernelAbstractions and CUDA.jl
 # supplies a device it can be launched on. That is the whole NVIDIA backend.
 #
 # This fills a hole rather than replacing a definition — `gpu_device(::Val)` has
@@ -16,7 +16,7 @@ using VisuTwinSim: heat_update, diffusion_coefficients, resolve, swapbuffers!
 # for `Val{:cuda}` adds a specialisation; redefining an existing method from an
 # extension would invalidate already-compiled callers and emit an overwrite
 # warning at load time.
-function VisuTwinSim.gpu_device(::Val{:cuda})
+function TwinSim.gpu_device(::Val{:cuda})
     CUDA.functional() || throw(ArgumentError(
         "CUDA.jl is loaded but no usable CUDA device was found. " *
         "Check `CUDA.versioninfo()`; on a machine without an NVIDIA GPU use " *
@@ -60,7 +60,7 @@ function raw_heat2d_kernel!(next, current, nx, ny, cx, cy, bc, source, dt)
     return nothing
 end
 
-function VisuTwinSim.step!(backend::RawCUDABackend, model::VisuTwinSim.Heat2D{T},
+function TwinSim.step!(backend::RawCUDABackend, model::TwinSim.Heat2D{T},
                            t = zero(T)) where {T}
     field = model.field
     nx, ny = size(field)
@@ -79,4 +79,4 @@ function VisuTwinSim.step!(backend::RawCUDABackend, model::VisuTwinSim.Heat2D{T}
     swapbuffers!(field)
     return model
 end
-end # module VisuTwinSimCUDAExt
+end # module TwinSimCUDAExt

@@ -6,10 +6,10 @@
 #
 #   julia --project=. examples/heat2d_gpu.jl
 #
-# Note what is *not* here: a GPU kernel. `VisuTwinSim.heat2d_kernel!` is written
+# Note what is *not* here: a GPU kernel. `TwinSim.heat2d_kernel!` is written
 # once with KernelAbstractions and this script only picks a different device.
 
-using VisuTwinSim
+using TwinSim
 
 # `Base.invokelatest` matters here: `using CUDA` defines the extension's device
 # method in a newer world age than this script was lowered in, so calling

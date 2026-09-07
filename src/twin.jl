@@ -169,7 +169,7 @@ function load_state(path::AbstractString)
     open(path, "r") do io
         magic = read(io, length(CHECKPOINT_MAGIC))
         magic == CHECKPOINT_MAGIC ||
-            throw(ArgumentError("$path is not a VisuTwinSim checkpoint (bad magic)"))
+            throw(ArgumentError("$path is not a TwinSim checkpoint (bad magic)"))
         tag = read(io, UInt8)
         haskey(TAG_ELTYPES, tag) || throw(ArgumentError("unknown element type tag $tag in $path"))
         T = TAG_ELTYPES[tag]

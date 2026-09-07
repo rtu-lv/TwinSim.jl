@@ -5,7 +5,7 @@
 # no source term, an analytical solution. If the runtime had any remaining
 # assumption that a model looks like heat diffusion, this would fail.
 
-import VisuTwinSim: step!, state, timestep, clock, flops_per_cell, move_to_device
+import TwinSim: step!, state, timestep, clock, flops_per_cell, move_to_device
 
 """Exponential decay, du/dt = -rate * u. Exact solution u0*(1 - rate*dt)^n."""
 struct Decay{T,A<:AbstractVector{T}} <: AbstractModel

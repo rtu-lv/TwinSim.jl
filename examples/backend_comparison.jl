@@ -7,7 +7,7 @@
 # on the hardware.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 const GRIDS = (256, 512, 1024, 2048, 4096)
 const STEPS = 500

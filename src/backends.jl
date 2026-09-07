@@ -45,7 +45,7 @@ end
 KernelBackend() = KernelBackend(KernelAbstractions.CPU())
 
 # Vendor GPU packages export their own `CUDABackend` / `MetalBackend` / `ROCBackend`
-# types. Naming ours `*Device` keeps `using VisuTwinSim, CUDA` free of the name
+# types. Naming ours `*Device` keeps `using TwinSim, CUDA` free of the name
 # clash that an exported `CUDABackend` here would cause.
 
 """
@@ -87,7 +87,7 @@ and the comparison between the two is about how the work is dispatched rather
 than about two people's arithmetic.
 
 ```julia
-using VisuTwinSim, CUDA
+using TwinSim, CUDA
 run!(model; backend = RawCUDABackend(threads = (32, 8)), steps = 100)
 ```
 """
@@ -122,10 +122,10 @@ function gpu_device(::Val{S}) where {S}
         The $S backend is not loaded.
 
             using Pkg; Pkg.add("$pkg")
-            using $pkg          # registers the device with VisuTwinSim
-            using VisuTwinSim
+            using $pkg          # registers the device with TwinSim
+            using TwinSim
 
-        `using $pkg` must happen in the same session; VisuTwinSim picks the device
+        `using $pkg` must happen in the same session; TwinSim picks the device
         up through a package extension. Currently available: $(join(available_backends(), ", ")).
         """))
 end

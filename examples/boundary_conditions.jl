@@ -7,7 +7,7 @@
 # before boundary conditions were made explicit.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 const STEPS = (0, 500, 2_000, 10_000, 50_000)
 

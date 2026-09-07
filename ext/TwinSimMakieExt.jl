@@ -1,15 +1,15 @@
-module VisuTwinSimMakieExt
+module TwinSimMakieExt
 
 using Makie
 using Printf
-using VisuTwinSim
-using VisuTwinSim: MetricRecorder, TwinLog, ObservationSeries, Heat2D, Field2D
+using TwinSim
+using TwinSim: MetricRecorder, TwinLog, ObservationSeries, Heat2D, Field2D
 
 # Triggered by `Makie`, not by a specific backend, so `using CairoMakie` (headless,
 # for reports and CI) and `using GLMakie` (interactive) both work — both load
 # Makie as a dependency.
 
-VisuTwinSim.plotting_backend_loaded(::Val{:makie}) = true
+TwinSim.plotting_backend_loaded(::Val{:makie}) = true
 
 # The field may live on a GPU; every plot needs it on the host.
 host_field(model::Heat2D) = Array(state(model))
@@ -20,7 +20,7 @@ host_field(data::AbstractMatrix) = Array(data)
 # Fields
 # ---------------------------------------------------------------------------
 
-function VisuTwinSim.plot_field(model::Union{Heat2D,Field2D,AbstractMatrix};
+function TwinSim.plot_field(model::Union{Heat2D,Field2D,AbstractMatrix};
                                 title = "",
                                 colormap = :inferno,
                                 colorrange = nothing,
@@ -52,7 +52,7 @@ end
 # Recorded metrics
 # ---------------------------------------------------------------------------
 
-function VisuTwinSim.plot_series(recorder::MetricRecorder;
+function TwinSim.plot_series(recorder::MetricRecorder;
                                  metrics = collect(keys(recorder.metrics)),
                                  title = "",
                                  xlabel = "simulated time",
@@ -79,7 +79,7 @@ end
 # Detection
 # ---------------------------------------------------------------------------
 
-function VisuTwinSim.plot_detection(times, residuals, truth;
+function TwinSim.plot_detection(times, residuals, truth;
                                     thresholds = Float64[],
                                     title = "residuals and detection thresholds",
                                     xlabel = "time",
@@ -115,8 +115,8 @@ function VisuTwinSim.plot_detection(times, residuals, truth;
     return figure
 end
 
-VisuTwinSim.plot_detection(residuals, truth; kwargs...) =
-    VisuTwinSim.plot_detection(1:length(residuals), residuals, truth; kwargs...)
+TwinSim.plot_detection(residuals, truth; kwargs...) =
+    TwinSim.plot_detection(1:length(residuals), residuals, truth; kwargs...)
 
 """Contiguous runs of `true`, as (from, to) index pairs."""
 function true_intervals(truth)
@@ -138,7 +138,7 @@ end
 # Scenario sweeps
 # ---------------------------------------------------------------------------
 
-function VisuTwinSim.plot_sweep(results::AbstractVector;
+function TwinSim.plot_sweep(results::AbstractVector;
                                 y = nothing,
                                 title = "scenario sweep",
                                 xlabel = "scenario",
@@ -146,7 +146,7 @@ function VisuTwinSim.plot_sweep(results::AbstractVector;
     isempty(results) && throw(ArgumentError("no scenarios to plot"))
     name = y === nothing ? first(keys(first(results).observation)) : y
 
-    labels = [VisuTwinSim.scenario_label(r.scenario) for r in results]
+    labels = [TwinSim.scenario_label(r.scenario) for r in results]
     values = [Float64(getproperty(r.observation, name)) for r in results]
 
     figure = Figure(; size = size)
@@ -162,7 +162,7 @@ end
 # Animation and streaming frames
 # ---------------------------------------------------------------------------
 
-function VisuTwinSim.animate_field(model::Heat2D, path::AbstractString;
+function TwinSim.animate_field(model::Heat2D, path::AbstractString;
                                    backend = CPUBackend(),
                                    frames::Integer = 100,
                                    steps_per_frame::Integer = 10,
@@ -191,13 +191,13 @@ function VisuTwinSim.animate_field(model::Heat2D, path::AbstractString;
     return path
 end
 
-function VisuTwinSim.frame_callback(path_pattern::AbstractString;
+function TwinSim.frame_callback(path_pattern::AbstractString;
                                     every::Integer = 1,
                                     colorrange = nothing,
                                     kwargs...)
     return function (model, progress)
         progress.step % every == 0 || return nothing
-        figure = VisuTwinSim.plot_field(model;
+        figure = TwinSim.plot_field(model;
                                         title = @sprintf("step %d, t = %.4g",
                                                          progress.step, progress.simulated_time),
                                         colorrange = colorrange, kwargs...)
@@ -206,4 +206,4 @@ function VisuTwinSim.frame_callback(path_pattern::AbstractString;
     end
 end
 
-end # module VisuTwinSimMakieExt
+end # module TwinSimMakieExt

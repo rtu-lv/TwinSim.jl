@@ -2,7 +2,7 @@
 # argument `state` would shadow the exported `state(model)` accessor inside the
 # closure, which is a confusing error to hit in a lab.
 
-change_interval_of(condition) = VisuTwinSim.change_interval(condition)
+change_interval_of(condition) = TwinSim.change_interval(condition)
 
 @testset "Steps validates its argument" begin
     # The original outer-constructor check never ran: the compiler-generated

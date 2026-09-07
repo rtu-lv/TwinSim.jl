@@ -2,7 +2,7 @@
 #
 #   julia --project=. examples/heat2d_cpu.jl
 
-using VisuTwinSim
+using TwinSim
 
 model = Heat2D(nx = 512, ny = 512, alpha = 0.15f0, dt = 0.1f0, boundary = Neumann())
 initialize_peak!(model.field, 100.0f0)

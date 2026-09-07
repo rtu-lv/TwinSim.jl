@@ -97,8 +97,8 @@ end
     model = Heat2D(nx = 32, ny = 32)
     params = model.params
     @test @inferred(cfl_number(params)) isa Float32
-    @test @inferred(VisuTwinSim.diffusion_coefficients(params)) isa NTuple{2,Float32}
-    @test @inferred(VisuTwinSim.bytes_per_cell(model)) == 8
+    @test @inferred(TwinSim.diffusion_coefficients(params)) isa NTuple{2,Float32}
+    @test @inferred(TwinSim.bytes_per_cell(model)) == 8
     @test @inferred(step!(CPUBackend(), model)) === model
 
     # The stepping loop must not allocate: a per-step allocation shows up as GC

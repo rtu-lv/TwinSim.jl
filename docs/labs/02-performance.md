@@ -7,7 +7,7 @@ performance number you did not measure on the machine in front of you.
 ## Every run is already a measurement
 
 ```julia
-using VisuTwinSim
+using TwinSim
 
 model = Heat2D(nx = 2048, ny = 2048)
 initialize_peak!(model.field, 100.0f0)

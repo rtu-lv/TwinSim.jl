@@ -9,7 +9,7 @@
 # hundred.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 alpha, dx = 0.15f0, 1.0f0
 

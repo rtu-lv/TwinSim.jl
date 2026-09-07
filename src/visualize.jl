@@ -5,7 +5,7 @@
 # has left the process can be plotted with anything, including tools that are not
 # Julia, and it is what a reproducibility package should contain anyway.
 #
-# Tier 2, in ext/VisuTwinSimMakieExt.jl: real figures, available once a Makie
+# Tier 2, in ext/TwinSimMakieExt.jl: real figures, available once a Makie
 # backend is loaded. Plotting is a heavy dependency and most runs do not need it,
 # so it stays optional — the same arrangement as the GPU backends.
 
@@ -116,7 +116,7 @@ end
 # ---------------------------------------------------------------------------
 #
 # Declared here so they are exported, documented and discoverable from
-# `names(VisuTwinSim)` whether or not a plotting backend is installed. The
+# `names(TwinSim)` whether or not a plotting backend is installed. The
 # fallbacks below are the only methods in this module; the extension adds more
 # specific ones rather than overwriting these.
 
@@ -125,7 +125,7 @@ const PLOTTING_HINT = """
 
         using Pkg; Pkg.add("CairoMakie")
         using CairoMakie          # or GLMakie for an interactive window
-        using VisuTwinSim
+        using TwinSim
 
     CairoMakie works headless, so it is the one to use on a cluster node or in CI.
 

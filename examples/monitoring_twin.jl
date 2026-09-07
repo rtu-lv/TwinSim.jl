@@ -11,7 +11,7 @@
 
 using Printf
 using Random
-using VisuTwinSim
+using TwinSim
 
 const GRID = 64
 const DT = 0.02f0             # hours per step

@@ -1,7 +1,7 @@
 """
-    VisuTwinSim
+    TwinSim
 
-Teaching and research package for VisuTwin simulation concepts, built for the
+Teaching package for simulation and digital twin concepts, built for the
 course *High-Performance Computing in Simulation and Digital Twin Systems*.
 
 The package is organised around four ideas that stay separate throughout:
@@ -17,7 +17,7 @@ The package is organised around four ideas that stay separate throughout:
 Every `run!` returns a measurement, because in this course the performance of a
 simulation is part of its result rather than an afterthought.
 """
-module VisuTwinSim
+module TwinSim
 
 using Adapt
 using KernelAbstractions
@@ -158,4 +158,4 @@ include("sweep.jl")
 include("visualize.jl")
 include("ensemble.jl")
 
-end # module VisuTwinSim
+end # module TwinSim

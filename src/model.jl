@@ -43,8 +43,8 @@ than silently computing on the wrong memory.
 ## A minimal model
 
 ```julia
-using VisuTwinSim
-import VisuTwinSim: step!, state, timestep, clock
+using TwinSim
+import TwinSim: step!, state, timestep, clock
 
 struct Decay{T} <: AbstractModel
     u::Vector{T}
@@ -159,7 +159,7 @@ function move_to_device(model::AbstractModel, device)
         It is a CPU-only model, which is a perfectly valid thing to be. To add GPU
         support, implement
 
-            VisuTwinSim.move_to_device(model::$(nameof(typeof(model))), device)
+            TwinSim.move_to_device(model::$(nameof(typeof(model))), device)
 
         returning a copy of the model with its arrays allocated on `device`
         (see `KernelAbstractions.allocate`) and the number of bytes copied.

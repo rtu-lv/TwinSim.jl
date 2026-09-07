@@ -24,7 +24,7 @@ bound, and it is why Lab 02 measures bandwidth rather than FLOP/s.
 ## The starting model
 
 ```julia
-using VisuTwinSim
+using TwinSim
 
 model = Heat2D(nx = 128, ny = 128)
 initialize_peak!(model.field, 100.0f0)
@@ -64,7 +64,7 @@ Two things to take from this:
 ## The GPU version
 
 ```julia
-using VisuTwinSim
+using TwinSim
 using CUDA          # or: using Metal / using AMDGPU
 
 model = Heat2D(nx = 2048, ny = 2048)
@@ -80,7 +80,7 @@ go through it. Choosing a backend changes the launch, not the arithmetic.
 
 Note the helper is `CUDADevice()`, not `CUDABackend()`. CUDA.jl exports a type of
 its own called `CUDABackend`, so a package exporting that name would make
-`using VisuTwinSim, CUDA` ambiguous.
+`using TwinSim, CUDA` ambiguous.
 
 ## Stability
 

@@ -1,5 +1,5 @@
 using Test
-using VisuTwinSim
+using TwinSim
 
 # GPU backends are optional. Any vendor package present in the test environment
 # is picked up automatically; everything else is skipped with a note rather than
@@ -37,7 +37,7 @@ else
     @info "Testing GPU backends: $(join(first.(GPU_BACKENDS), ", "))"
 end
 
-@testset "VisuTwinSim" begin
+@testset "TwinSim" begin
     include("test_field.jl")
     include("test_model.jl")
     include("test_model_interface.jl")

@@ -8,7 +8,7 @@
 # plant has heaters in it; all it ever sees is a handful of point measurements.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 const GRID = 64
 const WINDOW = 50        # steps between measurements

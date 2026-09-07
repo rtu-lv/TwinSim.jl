@@ -9,7 +9,7 @@
 # operator does. That split is the shape of a control-support twin.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 const HOURS = 72          # three days
 const DT = 0.02f0         # hours per step

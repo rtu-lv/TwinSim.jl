@@ -1,17 +1,17 @@
-# VisuTwinSim.jl
+# TwinSim.jl
 
-Julia teaching and research package for VisuTwin simulation concepts, with a CPU
+Julia teaching package for simulation and digital twin concepts, with a CPU
 reference backend and portable GPU backends for CUDA, Metal and ROCm.
 
 Built for the study course **High-Performance Computing in Simulation and
-Digital Twin Systems** and for examples accompanying CUDA Julia material.
+Digital Twin Systems** at Riga Technical University.
 
 ## Goals
 
 - Keep the student-facing API high level.
 - Use pure Julia for the reference implementation.
 - Run on a GPU without making any particular vendor's GPU mandatory.
-- Mirror the concepts of VisuTwin Sim Core: model, backend, runtime, metrics.
+- Keep four concepts separate throughout: model, backend, runtime, metrics.
 - Make performance part of the result rather than an afterthought: every `run!`
   returns a measurement that can go straight onto a roofline plot.
 
@@ -24,7 +24,7 @@ Pkg.test()
 ```
 
 ```julia
-using VisuTwinSim
+using TwinSim
 
 model = Heat2D(nx = 512, ny = 512, alpha = 0.15f0, dt = 0.1f0)
 initialize_peak!(model.field, 100.0f0)
@@ -84,7 +84,7 @@ are all optional and none of them is a hard dependency.
 
 > The GPU helpers are named `CUDADevice` / `MetalDevice` / `ROCmDevice`, not
 > `CUDABackend` / `MetalBackend`. Those names are already exported by CUDA.jl and
-> Metal.jl, so `using VisuTwinSim, CUDA` followed by `CUDABackend()` would be an
+> Metal.jl, so `using TwinSim, CUDA` followed by `CUDABackend()` would be an
 > ambiguity error rather than a working program.
 
 ### Boundary conditions decide whether the model conserves anything
@@ -316,7 +316,7 @@ the machine you most want it on.
 
 ```julia
 using Pkg; Pkg.add("CairoMakie")
-using CairoMakie, VisuTwinSim          # CairoMakie renders headless
+using CairoMakie, TwinSim          # CairoMakie renders headless
 
 save("field.png", plot_field(model))
 save("metrics.png", plot_series(recorder))
@@ -520,13 +520,8 @@ julia --project=/path/to/env -t 4 test/runtests.jl
 Currently verified: 230 tests passing on CPU, on Metal (Apple M2 Max) and on
 CUDA (RTX 4070 SUPER).
 
-## Relationship to VisuTwin Sim Core
-
-`VisuTwinSim.jl` is the high-level teaching/research interface. The C++23
-`visutwin-sim` project can remain the lower-level production/runtime
-implementation. The two can later be connected through a C ABI, CxxWrap,
-Arrow/Parquet state exchange, or generated kernels.
+## Checkpoint format
 
 The checkpoint format in `src/twin.jl` is deliberately a documented 50-byte
 header plus raw column-major data, so it can be read from C++ or Python without
-a Julia dependency — the simplest available bridge between the two projects.
+a Julia dependency.

@@ -8,7 +8,7 @@
 # stack, and CSV export needs nothing.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 # CairoMakie renders headless, which is what a cluster node or a CI job needs.
 # GLMakie opens a window instead, for exploring interactively.

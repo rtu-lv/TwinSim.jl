@@ -4,7 +4,7 @@
 #
 # This file defines a wave equation and gets the whole runtime for it — stop
 # conditions, metrics, callbacks, checkpointing, the twin loop, parameter sweeps —
-# without touching VisuTwinSim itself. Everything below could live in a separate
+# without touching TwinSim itself. Everything below could live in a separate
 # package that merely depends on it.
 #
 # It is deliberately a *different* problem from Heat2D: second order in time, so
@@ -15,12 +15,12 @@
 # Use it as the template for a contributed component.
 
 using Printf
-using VisuTwinSim
+using TwinSim
 
 # The four required methods. Import them by name to add methods rather than
 # shadow them — `import`, not `using`.
-import VisuTwinSim: step!, state, timestep, clock
-import VisuTwinSim: cells, bytes_per_cell, flops_per_cell, sum_state
+import TwinSim: step!, state, timestep, clock
+import TwinSim: cells, bytes_per_cell, flops_per_cell, sum_state
 
 # ---------------------------------------------------------------------------
 # The model

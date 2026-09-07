@@ -4,7 +4,7 @@
 
 using Printf
 using Statistics
-using VisuTwinSim
+using TwinSim
 
 trajectories, steps = 200_000, 2_000
 
