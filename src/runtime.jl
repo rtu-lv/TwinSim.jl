@@ -91,6 +91,11 @@ Timing notes: `compute_seconds` excludes callbacks, host transfers and real-time
 pacing, and is measured after a device synchronise so GPU numbers reflect kernel
 execution rather than launch time. A [`Converged`](@ref) stop condition adds a
 grid-wide reduction that *is* counted as compute.
+
+If a step or a callback throws, the exception propagates, and the model is left
+as the completed steps made it: its state and its clock both reflect them, so
+`simulated_time(model) / timestep(model)` says how many steps were taken. No
+`RunMetrics` is returned in that case.
 """
 function run!(sim::Simulation{<:AbstractModel};
               callback = nothing,
@@ -125,58 +130,73 @@ function run!(sim::Simulation{<:AbstractModel};
     excluded_ns = 0  # callback + transfer + pacing time, subtracted from compute
 
     loop_start = time_ns()
-    while true
-        reason = stop_reason(sim.stop, progress)
-        if reason !== nothing
-            metrics.stopped_by = reason
-            break
-        end
-        if progress.step >= step_limit
-            metrics.stopped_by = :step_limit
-            @warn "run! hit step_limit=$step_limit before any stop condition fired" sim.stop
-            break
-        end
-
-        # The drive is evaluated at the time *entering* the step, so the first
-        # step sees t = 0 and the series is sampled at the same instants the
-        # state is reported at.
-        step!(backend, model, oftype(dt, progress.simulated_time))
-        progress.step += 1
-        progress.simulated_time += dt
-
-        if snapshot !== nothing && progress.step % interval == 0
-            current = state(model)
-            progress.max_change = Float64(maximum(abs, current .- snapshot))
-            copyto!(snapshot, current)
-        end
-
-        if callback !== nothing && progress.step % callback_every == 0
-            pause = time_ns()
-            seconds, bytes = sync_to_host!(host, backend, model)
-            metrics.transfer_seconds += seconds
-            metrics.transferred_bytes += bytes
-            verdict = callback(host, progress)
-            excluded_ns += time_ns() - pause
-            if verdict === :stop
-                metrics.stopped_by = :callback
+    # The loop runs inside `try` for one reason: a step can throw part-way
+    # through a run, most commonly a drive with `extrapolate = :error` running
+    # past the end of its data. The steps taken before that are real, so the
+    # host model must end up with both the state *and* the clock they produced.
+    # Leaving the clock at its starting value would make the next `run!` replay
+    # the drive from the beginning on a state that has already advanced.
+    try
+        while true
+            reason = stop_reason(sim.stop, progress)
+            if reason !== nothing
+                metrics.stopped_by = reason
                 break
             end
-        end
-
-        if realtime_factor !== nothing
-            # Paced against what *this* run has advanced: the wall clock below
-            # also starts at this call, so an absolute simulated time would make
-            # a chained run think it was already far behind.
-            target = advanced(progress) / realtime_factor
-            achieved = (time_ns() - loop_start) / 1e9
-            if target > achieved
-                pause = time_ns()
-                sleep(target - achieved)
-                excluded_ns += time_ns() - pause
+            if progress.step >= step_limit
+                metrics.stopped_by = :step_limit
+                @warn "run! hit step_limit=$step_limit before any stop condition fired" sim.stop
+                break
             end
-        end
 
-        progress.elapsed_seconds = (time_ns() - loop_start) / 1e9
+            # The drive is evaluated at the time *entering* the step: step k
+            # (counting from 0) uses t_k = k*dt, so the first step sees t = 0.
+            # The clock is advanced afterwards. After n steps it therefore reads
+            # t_n while the last boundary value written is the one for t_(n-1):
+            # a Dirichlet edge lags the clock by one step, and n steps need
+            # drive data up to t_(n-1), not t_n.
+            step!(backend, model, oftype(dt, progress.simulated_time))
+            progress.step += 1
+            progress.simulated_time += dt
+
+            if snapshot !== nothing && progress.step % interval == 0
+                current = state(model)
+                progress.max_change = Float64(maximum(abs, current .- snapshot))
+                copyto!(snapshot, current)
+            end
+
+            if callback !== nothing && progress.step % callback_every == 0
+                pause = time_ns()
+                seconds, bytes = sync_to_host!(host, backend, model)
+                metrics.transfer_seconds += seconds
+                metrics.transferred_bytes += bytes
+                verdict = callback(host, progress)
+                excluded_ns += time_ns() - pause
+                if verdict === :stop
+                    metrics.stopped_by = :callback
+                    break
+                end
+            end
+
+            if realtime_factor !== nothing
+                # Paced against what *this* run has advanced: the wall clock below
+                # also starts at this call, so an absolute simulated time would make
+                # a chained run think it was already far behind.
+                target = advanced(progress) / realtime_factor
+                achieved = (time_ns() - loop_start) / 1e9
+                if target > achieved
+                    pause = time_ns()
+                    sleep(target - achieved)
+                    excluded_ns += time_ns() - pause
+                end
+            end
+
+            progress.elapsed_seconds = (time_ns() - loop_start) / 1e9
+        end
+    catch
+        sync_to_host!(host, backend, model)
+        clock(host)[] = progress.simulated_time
+        rethrow()
     end
 
     # Only after synchronising does the elapsed time mean anything on a GPU:

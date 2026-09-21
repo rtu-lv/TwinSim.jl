@@ -1,6 +1,11 @@
-# Lab 02: Measuring Performance
+# Tutorial: Measuring Performance
 
-Lab 01 established that the model is correct. This lab asks what it costs, and
+> An engine walkthrough, not a course assignment. The graded laboratory works of
+> DE1108 are published on the course site and are numbered independently of the
+> tutorials in this directory.
+
+The [heat diffusion tutorial](heat-diffusion.md) established that the model is
+correct. This one asks what it costs, and
 introduces the habit that the rest of the course depends on: never quote a
 performance number you did not measure on the machine in front of you.
 

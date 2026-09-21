@@ -78,6 +78,10 @@ abstract type AbstractModel end
 The live state array. On a GPU backend this is device memory; wrap in `Array` to
 bring it to the host.
 
+This is the array itself, not a copy. A double-buffered model such as `Heat2D`
+swaps its buffers on every step, so call `state` again after stepping rather
+than holding on to an earlier result, and `copy` it to keep a snapshot.
+
 **Required** for a custom model.
 """
 function state end
@@ -132,8 +136,26 @@ since only the model's author knows the real count.
 flops_per_cell(::AbstractModel) = 0
 
 sum_state(model::AbstractModel) = sum(state(model))
+
+"""
+    simulated_time(model) -> Float64
+
+The model's simulated clock: the sum of the time steps taken by every `run!` so
+far, which is `n * dt` after `n` steps up to `Float64` rounding. It belongs to
+the model rather than to a run, so successive `run!` calls continue from it.
+
+A time-varying boundary or source is evaluated at the clock value *entering* a
+step. After `n` steps the clock reads `n * dt`, while the last evaluation was at
+`(n - 1) * dt`.
+"""
 simulated_time(model::AbstractModel) = clock(model)[]
 
+"""
+    reset_clock!(model, t = 0.0) -> model
+
+Set the model's simulated clock to `t` without touching its state. Use it to
+replay a drive from the start on a model that has already been run.
+"""
 function reset_clock!(model::AbstractModel, t::Real = 0.0)
     clock(model)[] = Float64(t)
     return model

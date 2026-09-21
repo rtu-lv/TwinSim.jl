@@ -70,8 +70,15 @@ end
 """
     state(field) -> AbstractMatrix
 
-The live buffer. On a GPU backend this is a device array; call `Array(state(f))`
-to bring it back to the host.
+The live buffer: the array holding the current values. On a GPU backend this is
+a device array; call `Array(state(f))` to bring it back to the host.
+
+The result is the buffer itself, not a copy, and it is only "the state" until
+the next step. Every step writes into the other buffer and then swaps the two
+([`swapbuffers!`](@ref)), so an array obtained before a step is afterwards the
+scratch buffer: reading it gives the previous state and writing to it is
+overwritten by the next step. Call `state` again after stepping, and use
+`copy(state(f))` or `Array(state(f))` to keep a snapshot.
 """
 state(field::Field2D) = field.current
 
@@ -105,8 +112,8 @@ end
 
 Seed the field with a Gaussian bump. Diffusion has a closed-form solution for a
 Gaussian initial condition — it stays Gaussian and its variance grows as
-`sigma^2 + 2*alpha*t` — which is what `test/runtests.jl` uses to check the
-discretisation against the analytical solution rather than against itself.
+`sigma^2 + 2*alpha*t` — which is what `test/test_analytical.jl` uses to check
+the discretisation against the analytical solution rather than against itself.
 """
 function initialize_gaussian!(field::Field2D{T};
                               amplitude = one(T),

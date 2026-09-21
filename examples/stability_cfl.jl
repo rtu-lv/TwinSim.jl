@@ -5,8 +5,8 @@
 # The explicit scheme is stable only while
 #     CFL = alpha * dt * (1/dx^2 + 1/dy^2) <= 1/2.
 # Above that the solution does not just get inaccurate, it diverges — and it
-# does so exponentially, so a run that looks fine for fifty steps is NaN by two
-# hundred.
+# does so exponentially, so a run that is still finite after two hundred steps
+# is NaN by four hundred.
 
 using Printf
 using TwinSim
@@ -41,14 +41,15 @@ end
 
 println("""
 
-The transition is sharp. At CFL = 0.5005 (dt = 1.67) the run is still finite
-after 400 steps but already growing; a little above it, every extra step
-multiplies the error again and the field saturates to Inf and then NaN.
+The transition is sharp. At CFL = 0.501 (dt = 1.67) the checkerboard pattern
+already grows by 0.4 % per step, but after 400 steps it has not yet overtaken
+the decaying peak, so the maximum still falls. A little above it, every extra
+step multiplies the error again and the field saturates to Inf and then NaN.
 
 By default `Heat2D` refuses to build an unstable configuration:
 
     julia> Heat2D(nx = 64, dt = 2.0f0)
-    ERROR: ArgumentError: Unstable configuration: CFL number is 0.6 ...
+    ERROR: ArgumentError: Unstable configuration: stability number is 0.6, ...
 
 which turns a silent NaN twenty seconds into a run into an error at the point
 where the mistake was actually made.

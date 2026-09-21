@@ -2,9 +2,9 @@
 #
 #   julia --project=. examples/boundary_conditions.jl
 #
-# The same initial condition under three boundary conditions. Two conserve heat,
-# one does not — and the one that does not is the behaviour the package had
-# before boundary conditions were made explicit.
+# The same initial condition under three boundary conditions. Two conserve heat
+# and one does not, which is easy to get by accident: a stencil that simply
+# skips the edge cells is a Dirichlet boundary nobody chose.
 
 using Printf
 using TwinSim

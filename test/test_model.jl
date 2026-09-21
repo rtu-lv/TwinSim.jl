@@ -46,6 +46,38 @@ end
     params = Heat2DParams(alpha = 0.25f0, dt = 0.01f0, dx = 0.5f0, dy = 2.0f0)
     @test is_stable(Heat2DParams(alpha = 0.25f0, dt = max_stable_dt(params), dx = 0.5f0, dy = 2.0f0))
     @test cfl_number(Heat2DParams(alpha = 0.25f0, dt = max_stable_dt(params), dx = 0.5f0, dy = 2.0f0)) ≈ 0.5f0
+
+    # ...and it is always on the admissible side of it. For these two
+    # configurations the rounded quotient 0.5/rate gives a CFL number of
+    # 0.50000006f0, which the constructor would refuse.
+    for (alpha, dy) in ((0.15f0, 2.0f0), (0.3f0, 2.0f0), (0.15f0, 1.0f0)), T in (Float32, Float64)
+        params = Heat2DParams(alpha = T(alpha), dt = T(0.1), dx = one(T), dy = T(dy))
+        best = max_stable_dt(params)
+        @test best isa T
+        @test Heat2D(nx = 8, initial = zero(T), alpha = T(alpha), dt = best, dx = one(T), dy = T(dy)) isa Heat2D
+        @test !is_stable(Heat2DParams(alpha = T(alpha), dt = nextfloat(best), dx = one(T), dy = T(dy)))
+    end
+    @test max_stable_dt(Heat2DParams(alpha = 0.0f0)) == Inf32
+end
+
+@testset "invalid parameters are rejected, with or without the stability check" begin
+    for bad in ((dt = -0.1f0,), (dt = 0.0f0,), (dt = NaN32,), (dt = Inf32,),
+                (alpha = -0.15f0,), (alpha = NaN32,),
+                (dx = 0.0f0,), (dx = -1.0f0,), (dy = 0.0f0,), (dy = NaN32,))
+        @test_throws ArgumentError Heat2D(; nx = 8, bad...)
+        @test_throws ArgumentError Heat2D(; nx = 8, check_stability = false, bad...)
+    end
+    # The message names the parameter rather than reporting an "unstable" run.
+    err = try Heat2D(nx = 8, dx = 0.0f0) catch e; e end
+    @test occursin("dx must be", err.msg)
+
+    @test Heat2D(nx = 8, alpha = 0.0f0) isa Heat2D        # no diffusion is a valid model
+
+    # An integer initial value is read as a float instead of failing deep inside
+    # the parameter conversion; an integer field is refused by name.
+    @test eltype(Heat2D(nx = 8, initial = 20)) === Float64
+    @test eltype(Heat2D(nx = 8, initial = 20.0f0)) === Float32
+    @test_throws ArgumentError Heat2D(Field2D(fill(1, 8, 8)))
 end
 
 @testset "boundary conditions" begin

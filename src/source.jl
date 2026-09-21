@@ -138,7 +138,10 @@ Base.:+(a::NoSource, b::NoSource) = a
 # Applying a source inside the stencil
 # ---------------------------------------------------------------------------
 #
-# `source_rate` returns q; `apply_source` is what the stencil calls.
+# `source_rate` returns q; `apply_source` is what the stencil calls, as
+# `apply_source(source, diffused, i, j, dt)` at the end of `interior_update` and
+# `heat_update` in `src/kernels.jl`. For `NoSource` it returns `diffused`
+# unchanged, so a model without forcing computes the plain diffusion update.
 #
 # The split exists so that sources can be *summed* before being applied, which a
 # state-dependent term requires. `apply_source` keeps a dedicated NoSource method
@@ -176,6 +179,9 @@ end
 # Resolving a time-varying source to something a kernel can take
 # ---------------------------------------------------------------------------
 
+# As for boundaries, the split is "number" versus "something to call", so that a
+# callable struct such as SampledSeries works without subtyping Function.
+
 """
     resolve(source, t, ::Type{T}) -> SourceTerm
 
@@ -186,8 +192,6 @@ This happens once per step on the host. A GPU kernel cannot call an arbitrary
 Julia closure, and would not want to re-evaluate the same scalar in every one of
 a million threads even if it could.
 """
-# As for boundaries, the split is "number" versus "something to call", so that a
-# callable struct such as SampledSeries works without subtyping Function.
 @inline resolve(source::NoSource, t, ::Type{T}) where {T} = source
 
 @inline resolve(source::UniformSource{<:Number}, t, ::Type{T}) where {T} =

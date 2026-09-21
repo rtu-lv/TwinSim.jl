@@ -1,7 +1,11 @@
-# Lab 03: From Simulation to Digital Twin
+# Tutorial: From Simulation to Digital Twin
 
-Labs 01 and 02 built a simulation: give it an initial state, run it, get a
-result. A twin is different in three ways, and this lab adds them one at a time.
+> An engine walkthrough, not a course assignment. The graded laboratory works of
+> DE1108 are published on the course site and are numbered independently of the
+> tutorials in this directory.
+
+The first two tutorials built a simulation: give it an initial state, run it, get a
+result. A twin is different in three ways, and this tutorial adds them one at a time.
 
 1. It **ingests measurements** from the system it mirrors.
 2. It runs **against the wall clock**, not as fast as possible.
@@ -99,7 +103,7 @@ running an ensemble of twins for uncertainty estimation.
 Questions:
 
 5. At what grid size does `realtime_factor = 1.0` stop being achievable on your
-   machine? Use Lab 02's table to predict it before measuring.
+   machine? Use the table from the performance tutorial to predict it before measuring.
 6. What should a twin do when it *cannot* keep up — drop steps, coarsen the
    model, or fall behind? What does each choice cost?
 

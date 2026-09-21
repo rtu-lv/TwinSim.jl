@@ -253,15 +253,46 @@ end
     @test_throws ArgumentError Heat2D(nx = 8, dt = 10.0f0; source = UniformSource(1.0f0))
 end
 
-@testset "step! without a time argument evaluates the drive at zero" begin
-    # Documented behaviour: calling step! directly on a driven model without a
-    # time silently gives constant forcing. run! always passes the real clock.
+@testset "step! on a driven model requires a time argument" begin
+    # step! does not advance the clock, so without a time a driven model would
+    # be forced at t = 0 on every call. That is refused rather than done quietly;
+    # run! always passes the real clock.
     model = Heat2D(nx = 8, ny = 8; boundary = Dirichlet(t -> Float32(t)))
-    step!(CPUBackend(), model)
-    @test Array(state(model))[1, 1] == 0.0f0
+    @test_throws ArgumentError step!(CPUBackend(), model)
+    @test_throws ArgumentError step!(KernelBackend(), model)
+    @test all(iszero, state(model))                      # nothing was stepped
 
     step!(CPUBackend(), model, 7.0)
     @test Array(state(model))[1, 1] == 7.0f0
+
+    # A model nothing drives has no use for the time and may omit it.
+    plain = Heat2D(nx = 8, ny = 8; boundary = Dirichlet(3.0f0))
+    step!(CPUBackend(), plain)
+    @test Array(state(plain))[1, 1] == 3.0f0
+end
+
+@testset "a run that throws leaves state and clock consistent" begin
+    # Data to t = 4 covers the evaluation times t_0 .. t_39 of 40 steps at
+    # dt = 0.1. The 41st step asks for t_40, just past the end, and throws.
+    outdoor = SampledSeries(Float32[0, 1, 2, 3, 4], Float32[10, 5, 0, 5, 10];
+                            extrapolate = :error)
+    build() = Heat2D(nx = 8, ny = 8, initial = 20.0f0, dt = 0.1f0;
+                     boundary = Dirichlet(outdoor))
+
+    failed = build()
+    @test_throws ArgumentError run!(failed; steps = 50)
+
+    # The 40 completed steps are in the state *and* in the clock ...
+    reference = build()
+    run!(reference; steps = 40)
+    @test simulated_time(failed) == simulated_time(reference)
+    @test simulated_time(failed) ≈ 4.0
+    @test Array(state(failed)) == Array(state(reference))
+
+    # ... so retrying fails at the same place instead of replaying the drive from
+    # t = 0 on a state that has already advanced.
+    @test_throws ArgumentError run!(failed; steps = 1)
+    @test Array(state(failed)) == Array(state(reference))
 end
 
 # ---------------------------------------------------------------------------

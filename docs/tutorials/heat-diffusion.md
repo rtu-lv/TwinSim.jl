@@ -1,6 +1,10 @@
-# Lab 01: Heat Diffusion
+# Tutorial: Heat Diffusion
 
-This lab introduces the same model through three levels:
+> An engine walkthrough, not a course assignment. The graded laboratory works of
+> DE1108 are published on the course site and are numbered independently of the
+> tutorials in this directory.
+
+This tutorial introduces the same model through three levels:
 
 1. A scalar update equation.
 2. A CPU implementation with ordinary Julia arrays.
@@ -19,7 +23,7 @@ u'[i,j] = u[i,j]
 
 Each cell reads its four neighbours and writes one value. That ratio — a handful
 of arithmetic operations per value moved — is what makes this kernel memory
-bound, and it is why Lab 02 measures bandwidth rather than FLOP/s.
+bound, and it is why the [performance tutorial](performance.md) measures bandwidth rather than FLOP/s.
 
 ## The starting model
 

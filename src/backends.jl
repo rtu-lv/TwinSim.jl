@@ -146,6 +146,13 @@ function available_backends()
     return names
 end
 
+"""
+    backend_name(backend) -> Symbol
+
+Short label for a backend, such as `:cpu`, `:cpu_threaded`, `:ka_cpu`, `:cuda`
+or `:metal`. It is what `RunMetrics.backend` records, so results from different
+backends can be told apart in a table.
+"""
 backend_name(backend::CPUBackend) = backend.threaded ? :cpu_threaded : :cpu
 backend_name(::KernelBackend{KernelAbstractions.CPU}) = :ka_cpu
 

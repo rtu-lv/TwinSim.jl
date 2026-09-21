@@ -61,7 +61,7 @@ function raw_heat2d_kernel!(next, current, nx, ny, cx, cy, bc, source, dt)
 end
 
 function TwinSim.step!(backend::RawCUDABackend, model::TwinSim.Heat2D{T},
-                           t = zero(T)) where {T}
+                           t = TwinSim.undriven_step_time(model)) where {T}
     field = model.field
     nx, ny = size(field)
     cx, cy = diffusion_coefficients(model.params)

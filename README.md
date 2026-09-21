@@ -200,6 +200,16 @@ exceeds the explicit-scheme limit of 0.5. The run would diverge to NaN.
 ...
 ```
 
+`max_stable_dt` returns the largest `dt` that passes this check, rounded down to
+a representable value, so `Heat2D(dt = max_stable_dt(params), ...)` is always
+accepted.
+
+Parameters that are invalid rather than unstable are a separate matter, and are
+rejected even with `check_stability = false`: `dt`, `dx` and `dy` must be finite
+and positive, and `alpha` finite and non-negative. Without that check a negative
+`dt` would pass, because its stability number is negative and therefore below
+the limit.
+
 The quantity checked is `stability_number`, not `cfl_number`:
 
 ```
@@ -479,7 +489,7 @@ src/ensemble.jl      random walk ensemble
 ext/                 CUDA / Metal / AMDGPU device registration
 examples/            runnable course examples
 test/                package tests
-docs/labs/           lab notes
+docs/tutorials/      engine walkthroughs (not the graded course labs)
 ```
 
 ## Examples

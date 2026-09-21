@@ -16,8 +16,8 @@ abstract type StopCondition end
 Stop after exactly `count` steps.
 
 The validation lives in an inner constructor. As an outer method it would be
-shadowed by the compiler-generated `Steps(::Int)` for every `Int` argument,
-which is why `Steps(-5)` used to be accepted.
+shadowed by the compiler-generated `Steps(::Int)` for every `Int` argument, and
+`Steps(-5)` would be accepted.
 """
 struct Steps <: StopCondition
     count::Int
@@ -32,7 +32,7 @@ end
     UntilTime(time)
 
 Stop once the model's simulated clock reaches `time`. Unlike a step count this is
-independent of `dt`, so refining the time step no longer changes what is being
+independent of `dt`, so refining the time step does not change what is being
 compared.
 
 The clock is **absolute**: it is the model's own clock, which persists across
